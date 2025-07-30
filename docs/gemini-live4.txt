@@ -1,0 +1,137 @@
+Session management with Live API
+
+In the Live API, a session refers to a persistent connection where input and output are streamed continuously over the same connection (read more about how it works). This unique session design enables low latency and supports unique features, but can also introduce challenges, like session time limits, and early termination. This guide covers strategies for overcoming the session management challenges that can arise when using the Live API.
+
+Session lifetime
+Without compression, audio-only sessions are limited to 15 minutes, and audio-video sessions are limited to 2 minutes. Exceeding these limits will terminate the session (and therefore, the connection), but you can use context window compression to extend sessions to an unlimited amount of time.
+
+The lifetime of a connection is limited as well, to around 10 minutes. When the connection terminates, the session terminates as well. In this case, you can configure a single session to stay active over multiple connections using session resumption. You'll also receive a GoAway message before the connection ends, allowing you to take further actions.
+
+Context window compression
+To enable longer sessions, and avoid abrupt connection termination, you can enable context window compression by setting the contextWindowCompression field as part of the session configuration.
+
+In the ContextWindowCompressionConfig, you can configure a sliding-window mechanism and the number of tokens that triggers compression.
+
+Python
+JavaScript
+
+const config = {
+  responseModalities: [Modality.AUDIO],
+  contextWindowCompression: { slidingWindow: {} }
+};
+Session resumption
+To prevent session termination when the server periodically resets the WebSocket connection, configure the sessionResumption field within the setup configuration.
+
+Passing this configuration causes the server to send SessionResumptionUpdate messages, which can be used to resume the session by passing the last resumption token as the SessionResumptionConfig.handle of the subsequent connection.
+
+Python
+JavaScript
+
+import { GoogleGenAI, Modality } from '@google/genai';
+
+const ai = new GoogleGenAI({ apiKey: "GEMINI_API_KEY" });
+const model = 'gemini-2.0-flash-live-001';
+
+async function live() {
+  const responseQueue = [];
+
+  async function waitMessage() {
+    let done = false;
+    let message = undefined;
+    while (!done) {
+      message = responseQueue.shift();
+      if (message) {
+        done = true;
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+    return message;
+  }
+
+  async function handleTurn() {
+    const turns = [];
+    let done = false;
+    while (!done) {
+      const message = await waitMessage();
+      turns.push(message);
+      if (message.serverContent && message.serverContent.turnComplete) {
+        done = true;
+      }
+    }
+    return turns;
+  }
+
+console.debug('Connecting to the service with handle %s...', previousSessionHandle)
+const session = await ai.live.connect({
+  model: model,
+  callbacks: {
+    onopen: function () {
+      console.debug('Opened');
+    },
+    onmessage: function (message) {
+      responseQueue.push(message);
+    },
+    onerror: function (e) {
+      console.debug('Error:', e.message);
+    },
+    onclose: function (e) {
+      console.debug('Close:', e.reason);
+    },
+  },
+  config: {
+    responseModalities: [Modality.TEXT],
+    sessionResumption: { handle: previousSessionHandle }
+    // The handle of the session to resume is passed here, or else null to start a new session.
+  }
+});
+
+const inputTurns = 'Hello how are you?';
+session.sendClientContent({ turns: inputTurns });
+
+const turns = await handleTurn();
+for (const turn of turns) {
+  if (turn.sessionResumptionUpdate) {
+    if (turn.sessionResumptionUpdate.resumable && turn.sessionResumptionUpdate.newHandle) {
+      let newHandle = turn.sessionResumptionUpdate.newHandle
+      // ...Store newHandle and start new session with this handle here
+    }
+  }
+}
+
+  session.close();
+}
+
+async function main() {
+  await live().catch((e) => console.error('got error', e));
+}
+
+main();
+Receiving a message before the session disconnects
+The server sends a GoAway message that signals that the current connection will soon be terminated. This message includes the timeLeft, indicating the remaining time and lets you take further action before the connection will be terminated as ABORTED.
+
+Python
+JavaScript
+
+const turns = await handleTurn();
+
+for (const turn of turns) {
+  if (turn.goAway) {
+    console.debug('Time left: %s\n', turn.goAway.timeLeft);
+  }
+}
+Receiving a message when the generation is complete
+The server sends a generationComplete message that signals that the model finished generating the response.
+
+Python
+JavaScript
+
+const turns = await handleTurn();
+
+for (const turn of turns) {
+  if (turn.serverContent && turn.serverContent.generationComplete) {
+    // The generation is complete
+  }
+}
+What's next
+Explore more ways to work with the Live API in the full Capabilities guide, the Tool use page, or the Live API cookbook.

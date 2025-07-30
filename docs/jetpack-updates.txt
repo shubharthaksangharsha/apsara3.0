@@ -1,0 +1,227 @@
+Jetpack Compose: Google I/O 2025 Updates
+Jetpack Compose continues to evolve as Android’s modern UI toolkit. At Google I/O 2025 the Compose team announced dozens of new features and improvements across the framework, libraries, and tooling
+android-developers.googleblog.com
+. Compose has “matured a lot” since its debut (I/O 2019) and is now used by ~60% of the top 1,000 Play Store apps
+android-developers.googleblog.com
+. The 2025 updates include new Compose APIs and composables, rendering and performance optimizations, tighter integration with Jetpack libraries, improved Android Studio support (including AI-assisted tools), and even enhanced Compose Multiplatform support. The summaries below cover these areas in depth.
+New Compose APIs & Composables
+Autofill support. Compose now lets users autofill text fields by annotating them with Modifier.semantics { contentType = ... }. Developers can opt into the Android Autofill Framework so that usernames, addresses, credit cards, etc. can be filled automatically
+android-developers.googleblog.com
+. In practice you simply set the appropriate contentType on your TextField and Compose handles the rest. (For example, TextField(state, modifier = Modifier.semantics { contentType = ContentType.Username }) will present a username autofill option.) This feature requires using the same Compose BOM version for UI and Foundation – the release notes caution that without the BOM, mismatched versions can break Autofill
+android-developers.googleblog.com
+. Auto-sizing text. A new autoSize parameter lets text scale to fit its container. For example, you can write:
+kotlin
+Copy
+Edit
+Box {
+    BasicText(
+        text = "Hello World",
+        maxLines = 1,
+        autoSize = TextAutoSize.StepBased()
+    )
+}
+This autoSize modifier (in Compose UI 1.8) will shrink or grow the text size in steps so that it fits its parent’s width
+android-developers.googleblog.com
+android-developers.googleblog.com
+. You can also customize minimum/maximum font sizes and step intervals. (Material3’s Text will get a similar overload soon.) Relatedly, Compose 1.8 adds new overflow ellipsis modes: TextOverflow.StartEllipsis and TextOverflow.MiddleEllipsis for showing “…” at the start or middle of overflowing text
+android-developers.googleblog.com
+. Visibility tracking. A new low-overhead layout callback, Modifier.onLayoutRectChanged { rect -> … }, lets you observe a composable’s bounds or visibility with throttling. This is designed for high-performance use in lists (e.g. to track item visibility on screen). It replaces many use-cases of onGloballyPositioned, with built-in debouncing to avoid flooding callbacks
+android-developers.googleblog.com
+android-developers.googleblog.com
+. In Compose 1.9 (coming soon) higher-level APIs will be added on top of this low-level modifier. Animated bounds. Within a LookaheadScope, the new Modifier.animateBounds() will automatically animate a composable’s size and position when those change
+android-developers.googleblog.com
+android-developers.googleblog.com
+. In practice you wrap content in a LookaheadScope { … } and attach .animateBounds(this@LookaheadScope); then resizing or reflow of that composable will be smoothly animated (as illustrated below). This builds on shared-element and lookahead layout support stabilized last year. For example:
+kotlin
+Copy
+Edit
+LookaheadScope {
+    Box(
+        Modifier
+            .width(if (expanded) 180.dp else 110.dp)
+            .offset(x = if (expanded) 0.dp else 100.dp)
+            .animateBounds(this@LookaheadScope)
+            .background(Color.LightGray, shape = RoundedCornerShape(12.dp))
+            .height(50.dp)
+    ) {
+        Text("Layout Content", Modifier.align(Alignment.Center))
+    }
+}
+When expanded toggles, the box smoothly moves and resizes
+android-developers.googleblog.com
+. Accessibility in tests. New Espresso testing support flags common accessibility issues. In Compose, you can now call enableAccessibilityChecks() in your UI tests to automatically validate ARIA semantics, color contrast, touch target sizes, etc
+android-developers.googleblog.com
+android-developers.googleblog.com
+. (This was a top-requested feature: the release notes cite adding an enableAccessibilityChecks option in tests
+android-developers.googleblog.com
+.) This helps catch problems like missing labels or insufficient tap areas as part of automated test runs. Other new APIs (Alpha). The Compose alpha BOM (beyond the stable release) includes several experimental features worth previewing
+android-developers.googleblog.com
+: Pausable Composition (allows breaking up recomposition work across frames for smoother UI updates), improved LazyLayout prefetching, a Context Menu API (for platform-style right-click menus), and new modifiers such as onFirstVisible, onVisibilityChanged, and a generic contentType. Two new lint annotations were also introduced: @FrequentlyChangingValue (to warn about values that cause too-frequent recomposition) and @RememberInComposition (to require remembering expensive constructors/states)
+android-developers.googleblog.com
+. Material3 Expressive. In tandem with Compose, Google unveiled Material Expressive (the next evolution of Material Design) at I/O 2025. The Compose Material3 library (in the latest alpha BOM) includes many new expressive components, styles, and motions for richer UI (e.g. personalized icons, new container styles, etc.)
+android-developers.googleblog.com
+. These are built on top of Compose and can be tried out via the Material3 library.
+Adaptive Layouts and Form Factors
+Compose’s Adaptive Layouts library (for multi-pane/tablet/desktop UIs) saw major updates. The stable 1.1 release adds predictive back gestures (smoothing swipe-back animations) and pane expansion (flexible two-pane layouts where one pane can “expand” over another)
+android-developers.googleblog.com
+. The 1.2 alpha adds more advanced pane strategies for adaptive UIs (such as reflowing content into new layouts and levitating panes)
+android-developers.googleblog.com
+. In practice, using recommended patterns like List–Detail or canonical Pane layouts will now automatically adapt when the window is resized on large screens. Relatedly, AndroidX Window Manager 1.5 introduces new window size classes (with “large” and “extra-large” breakpoints for desktop and tablet) to help Compose apps adapt by size
+android-developers.googleblog.com
+. Compose now also targets new form factors beyond phones. The team highlighted support for foldables, tablets, cars, and even Android XR. For example, the Android XR SDK (dev preview) comes with new Material XR Compose components and an integrated emulator
+android-developers.googleblog.com
+. Though not strictly Compose framework changes, developers are encouraged to use Compose adaptive libraries to build one app that works across 500M devices
+android-developers.googleblog.com
+.
+Performance & Rendering Improvements
+Performance optimizations continue under the hood with every Compose release. The I/O announcements note that the latest stable Compose includes “significant rewrites and improvements” in subsystems like semantics, focus handling, and text layout
+android-developers.googleblog.com
+. Crucially, these improvements benefit all apps with no code changes needed – simply upgrading your Compose dependency yields smoother rendering. Internal benchmarks (e.g. Pixel 3a jank tests) show steady drops in frame-rate hitches over time
+android-developers.googleblog.com
+. On the cutting edge, the alpha BOM adds several aggressive performance features
+android-developers.googleblog.com
+: Pausable Composition lets large compositions pause work over multiple frames; Background text prefetch warms up text layout caches on a worker thread; and smarter LazyLayout prefetch uses these capabilities to load just enough content ahead of scroll. Together, these changes can “eliminate nearly all jank” in internal tests
+android-developers.googleblog.com
+. Early experiments (and community reports) indicate that text-heavy UIs and complex lists run considerably smoother with these alpha features enabled. The Compose runtime also improved API stability. Many APIs previously marked @Experimental were hardened and stabilized (the team reduced experimental APIs by ~32% in a year
+android-developers.googleblog.com
+). Debugging was enhanced too: the latest alpha adds an opt-in diagnostic stack trace for Compose (to surface your code frames in crashes), which developers can enable via Composer.setDiagnosticStackTraceEnabled(true) in debug builds
+android-developers.googleblog.com
+.
+Tooling & Android Studio Enhancements
+Android Studio received major updates to support Compose development. The Narwhal Feature Drop (AS 2025.2.1) in May 2025 includes rich Compose-specific tooling
+android-developers.googleblog.com
+:
+Resizable Previews: The Compose Preview window can now be interactively resized to see how layouts adapt to different device sizes (phones, tablets, foldables, desktop windows, etc.)
+android-developers.googleblog.com
+.
+Preview Navigation: You can click on a preview’s component names or sources directly to navigate in code, making it easier to connect previews to composables.
+AI-Powered Studio Labs (Gemini): Several new AI tools arrived for Compose:
+Compose Preview Generation: Right-click a composable and select Gemini → Generate Compose Preview to have Gemini craft a @Preview function for you (with code shown in a diff view)
+android-developers.googleblog.com
+.
+Transform UI with Gemini: In the preview panel, you can invoke “Transform UI with Gemini” and describe changes in natural language (e.g. “Center align the buttons”). Gemini edits the Compose code in-place to implement it
+android-developers.googleblog.com
+.
+Image Attachment: You can attach a design mockup or screenshot to a Gemini prompt. Gemini will then generate Compose UI code for that image or explain the layout in the screenshot
+android-developers.googleblog.com
+.
+@File Context: When chatting with Gemini, you can type @ to attach project files as context, giving Gemini access to your own code as reference
+android-developers.googleblog.com
+.
+Beyond these Labs features, AS also now treats AI tools (like Gemini) as opt-in Studio Labs in even the stable channel, so you can experiment with them early
+android-developers.googleblog.com
+. The improvements above aim to dramatically speed up UI creation and iteration in Compose.
+Integration with Jetpack Libraries
+Compose now has first-class support across many Jetpack libraries:
+Jetpack Navigation 3 (Nav3): A brand-new navigation library built for Compose (sometimes called Nav3). Unlike the old Nav-Compose, in Nav3 your code owns the back stack state. For example you might write:
+kotlin
+Copy
+Edit
+data object Home
+data class Product(val id: String)
+val backStack = remember { mutableStateListOf<Any>(Home) }
+NavDisplay(
+  backStack = backStack,
+  onBack = { backStack.removeLastOrNull() },
+  entryProvider = { route -> /* map route to content */ }
+)
+Here the back stack is a SnapshotStateList you manipulate directly (adding/removing routes) and a NavDisplay re-displays it on screen
+android-developers.googleblog.com
+. Nav3 offers built-in animations (including adaptive predictive back gestures) and a flexible Scene API for multi-pane layouts
+android-developers.googleblog.com
+. Since Nav3 is fully Compose-native, it simplifies complex flows (like authentication or multi-pane tablets) by giving you complete control. (The library is in alpha; see the official docs and the Nav3 GitHub recipes for examples.)
+CameraX (Compose Viewfinder): CameraX now has a Compose-native viewfinder component. The new androidx.camera:camera-viewfinder-compose:1.0.0-alpha02 library provides a Viewfinder composable that works with CameraX/Camera2. It supports touch interactions and adjusts to different aspect ratios
+developer.android.com
+. In practice, you can use it inside Compose layouts to show the camera preview. This makes it straightforward to build a camera UI entirely in Compose. (For example, the sample might look like CameraViewfinder() within a Compose hierarchy.)
+Media3 (Video/Audio UI): The AndroidX Media3 library includes a media3-ui-compose module with UI primitives for audio and video playback. For instance, you can use PlayerSurface(player) to display video and helper state classes for play/pause controls
+android-developers.googleblog.com
+. Sample code looks like:
+kotlin
+Copy
+Edit
+@Composable
+fun VideoPlayer(player: Player?, modifier: Modifier = Modifier) {
+    Box(modifier) {
+        PlayerSurface(player)                 // Compose video output
+        player?.let {
+            val state = rememberPlayPauseButtonState(it)
+            MyPlayPauseButton(state, Modifier.align(BottomEnd).padding(16.dp))
+        }
+    }
+}
+Here PlayerSurface and rememberPlayPauseButtonState come from Media3’s Compose UI package. These additions make integrating ExoPlayer/Media3 in Compose UIs much easier.
+Paging, ViewModel, etc.: While not Compose-specific, Google is expanding Kotlin Multiplatform support in Jetpack (see next section), including libraries like Paging. (For pure Compose integration, Paging 3 and other architecture components continue to work as before, but now Kotlin/Native and iOS platforms can share more code.)
+Overall, the trend is tighter Compose integration: the Navigation team rewrote nav to match Compose idioms, CameraX provides direct Compose APIs, and media/camera samples now demo Compose-first UIs. This ensures Compose works seamlessly with common app components (Navigation, lists, media, camera, etc.) in modern apps.
+Compose Multiplatform Highlights
+Beyond Android, Compose Multiplatform (by JetBrains) saw important milestones around this time. Notably, Compose Multiplatform 1.8 was released (May 2025) making Compose-for-iOS stable and production-ready
+blog.jetbrains.com
+. Key points:
+Compose for iOS stable: All major APIs are now stable with strong compatibility guarantees
+blog.jetbrains.com
+. Compose UIs written in shared Kotlin can run natively on iOS with full feature parity (including navigation and accessibility). The blog highlights first-class iOS features like VoiceOver and native scrolling physics
+blog.jetbrains.com
+blog.jetbrains.com
+.
+Performance: Benchmarks show Compose on iOS has performance on par with native SwiftUI. Startup time to first frame is comparable, scrolling is smooth even at 120Hz, and the additional app size overhead is modest (~9 MB)
+blog.jetbrains.com
+.
+Tooling: A new Kotlin Multiplatform plugin is coming (for Android Studio/IntelliJ) that will add Compose Preview in common modules and resource management tools
+blog.jetbrains.com
+. Importantly, Compose Hot Reload is already available: you can change Compose UI code and see it update live on the device/emulator without restarting the app, retaining state
+blog.jetbrains.com
+.
+In short, by mid-2025 Compose Multiplatform covers Android, Desktop, and now iOS, enabling developers to share UI code across all major platforms. (Various Jetpack libraries are also moving toward multiplatform; for example, Paging and ViewModel now have KMP support
+android-developers.googleblog.com
+.) For Android developers curious about MPP, the advice is to try the alpha libraries and KMP templates in Android Studio (Meerkat) when exploring cross-platform UIs.
+Backward Compatibility & Migration Notes
+AndroidX minSdk change: Starting June 2025, many AndroidX libraries will increase their minimum SDK requirement from 21 to 23
+developer.android.com
+. This reflects the overall Android market distribution. Apps still targeting old versions may need to adjust their minSdkVersion or avoid upgrading certain libraries. (Some artifacts will not be re-released and will keep supporting 21.) Be sure to check the release notes for each AndroidX component you use.
+Compose BOM usage: Google strongly recommends using the Compose Bill of Materials (BOM) to align versions of all Compose artifacts. For example, to use the April ’25 release you add platform("androidx.compose:compose-bom:2025.04.01") in Gradle
+android-developers.googleblog.com
+. The release notes warn: “If you are not using the BOM, make sure to upgrade Compose Foundation and Compose UI at the same time. Otherwise, autofill will not work correctly.”
+android-developers.googleblog.com
+. In practice, always upgrade Compose UI, Foundation, Material, Animation, etc. together as a group.
+API stability: Many experimental APIs were stabilized or deprecated. The April blog noted that the number of experimental annotations was cut drastically (from 172 to 70 between 1.7 and 1.8)
+android-developers.googleblog.com
+. Conversely, a few recently-added experimental layouts (ContextualFlowRow/Column) were deprecated in favor of stable ones
+android-developers.googleblog.com
+. These changes should be noted when upgrading, but no major breaking changes were announced besides deprecations; most users can update Compose versions safely.
+Demos, Samples, and Resources
+Google I/O 2025 featured several Compose-related sessions and samples:
+I/O Talks: The Android dev team presented focused talks like “Mastering Text Input in Compose” and “Build more accessible UIs with Jetpack Compose”
+android-developers.googleblog.com
+. These demos show best practices for using the new APIs (text input, autofill, a11y, etc.).
+Adaptive Apps Playlist: A series on building adaptive UIs shows using Compose panes, Navigation 3, Window size classes, and multi-device layouts
+android-developers.googleblog.com
+android-developers.googleblog.com
+.
+Samples/Docs: The official docs include updated guides. For example, the Media3 dev center has a Compose-based UI guide (showing PlayerSurface and state holders)
+developer.android.com
+developer.android.com
+. The AndroidX releases page lists Compose 1.8 as the stable April ’25 version and links to release notes
+developer.android.com
+. The Navigation3 blog provides a “recipes” repository on GitHub with example nav patterns
+android-developers.googleblog.com
+. CameraX samples on GitHub now demonstrate Compose usage (see android/platform-samples under CameraX).
+Codelabs & Tutorials: For multiplatform, there are new codelabs (e.g. Getting Started with Kotlin Multiplatform and Migrating Room to KMP
+android-developers.googleblog.com
+) which also touch on Compose usage in shared modules.
+Android Studio Arctic Fox+: All these features (resizable previews, Gemini, KMP module templates, etc.) are available in Android Studio Narwhal (2025.2) canary. The stable Narwhal release and previews let you try AI features via Studio Labs
+android-developers.googleblog.com
+android-developers.googleblog.com
+.
+In summary, Google I/O 2025 reinforced that “Compose is now” – it’s mature, performant, and rich in capability. Developers should upgrade to the latest Compose BOM to take advantage of autofill, adaptive layout support, and AI-assisted tooling
+android-developers.googleblog.com
+android-developers.googleblog.com
+. With Nav3, CameraX Compose components, and multiplatform support, Compose is increasingly the center of Android UI development. Sources: Official Android Developers Blog posts and AndroidX release notes from Google I/O 2025
+android-developers.googleblog.com
+android-developers.googleblog.com
+android-developers.googleblog.com
+android-developers.googleblog.com
+android-developers.googleblog.com
+developer.android.com
+blog.jetbrains.com
+android-developers.googleblog.com
+ (see citations). These cover all announced changes in Compose and related libraries at I/O 2025.
+
