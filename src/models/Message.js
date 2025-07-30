@@ -17,6 +17,11 @@ const messageSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+  messageSequence: {
+    type: Number,
+    required: true,
+    index: true
+  },
   
   // Message type and API
   messageType: {
@@ -201,6 +206,7 @@ const messageSchema = new mongoose.Schema({
 
 // Indexes for performance
 messageSchema.index({ conversationId: 1, createdAt: 1 });
+messageSchema.index({ conversationId: 1, messageSequence: 1 });
 messageSchema.index({ userId: 1, createdAt: -1 });
 messageSchema.index({ messageType: 1, role: 1 });
 messageSchema.index({ status: 1 });
@@ -270,10 +276,24 @@ messageSchema.methods.setError = function(error) {
 };
 
 // Static methods
-messageSchema.statics.findByConversation = function(conversationId, limit = 50) {
-  return this.find({ conversationId, isVisible: true })
-    .sort({ createdAt: 1 })
-    .limit(limit);
+messageSchema.statics.findByConversation = function(conversationId, limit = 50, includeHistory = false) {
+  const query = { conversationId, isVisible: true };
+  return this.find(query)
+    .sort({ messageSequence: 1 })
+    .limit(includeHistory ? limit : limit);
+};
+
+messageSchema.statics.getConversationHistory = function(conversationId, includeThoughts = false) {
+  const query = { 
+    conversationId, 
+    isVisible: true,
+    status: 'completed',
+    role: { $in: ['user', 'model'] }
+  };
+  
+  return this.find(query)
+    .select(`messageId messageSequence role content.text ${includeThoughts ? 'content.thoughts' : ''} createdAt`)
+    .sort({ messageSequence: 1 });
 };
 
 messageSchema.statics.findUserMessages = function(userId, messageType = null, limit = 100) {

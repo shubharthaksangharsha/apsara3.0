@@ -21,7 +21,7 @@ import aiRoutes from './routes/ai.js';
 import fileRoutes from './routes/files.js';
 import userRoutes from './routes/users.js';
 
-import toolsRoutes from './routes/tools.js';
+import pluginsRoutes from './routes/tools.js';
 import sessionRoutes from './routes/sessions.js';
 import googleAuthRoutes from './routes/google-auth.js';
 import conversationRoutes from './routes/conversations.js';
@@ -99,7 +99,7 @@ class ApsaraServer {
     this.app.use('/api/files', fileRoutes);
     this.app.use('/api/users', userRoutes);
 
-    this.app.use('/api/tools', toolsRoutes);
+    this.app.use('/api/plugins', pluginsRoutes);
     this.app.use('/api/sessions', sessionRoutes);
     this.app.use('/api/auth', googleAuthRoutes);
     this.app.use('/api/conversations', conversationRoutes);
@@ -115,7 +115,7 @@ class ApsaraServer {
           '/api/files': 'File upload and management',
           '/api/users': 'User management and authentication',
 
-          '/api/tools': 'Tools and function calling',
+          '/api/plugins': 'Plugin system and function calling',
           '/api/sessions': 'Session management',
           '/live': 'WebSocket endpoint for Live API'
         }

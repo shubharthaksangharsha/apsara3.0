@@ -31,10 +31,6 @@ const conversationSchema = new mongoose.Schema({
   config: {
     // REST API config
     rest: {
-      model: {
-        type: String,
-        default: 'gemini-2.5-flash'
-      },
       systemInstruction: String,
       temperature: {
         type: Number,
@@ -56,10 +52,6 @@ const conversationSchema = new mongoose.Schema({
     
     // Live API config
     live: {
-      model: {
-        type: String,
-        default: 'gemini-2.0-flash-live-001'
-      },
       responseModalities: [{
         type: String,
         enum: ['TEXT', 'AUDIO']
@@ -100,6 +92,10 @@ const conversationSchema = new mongoose.Schema({
   // Statistics
   stats: {
     totalMessages: {
+      type: Number,
+      default: 0
+    },
+    messageSequence: {
       type: Number,
       default: 0
     },
@@ -147,6 +143,7 @@ conversationSchema.index({ 'session.lastActivity': -1 });
 // Instance methods
 conversationSchema.methods.incrementStats = function(type, tokens = 0) {
   this.stats.totalMessages += 1;
+  this.stats.messageSequence += 1;
   this.stats.totalTokens += tokens;
   
   if (type === 'rest') {
@@ -157,6 +154,11 @@ conversationSchema.methods.incrementStats = function(type, tokens = 0) {
   
   this.session.lastActivity = new Date();
   return this.save();
+};
+
+conversationSchema.methods.getNextMessageSequence = function() {
+  this.stats.messageSequence += 1;
+  return this.stats.messageSequence;
 };
 
 conversationSchema.methods.updateLiveSession = function(sessionId, handle = null) {

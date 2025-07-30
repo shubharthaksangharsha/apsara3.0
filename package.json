@@ -13,8 +13,9 @@
     "test:live": "node test-apsara.js live",
     "test:files": "node test-apsara.js files",
 
-    "test:tools": "node test-apsara.js tools",
+    "test:plugins": "node test-apsara.js plugins",
     "test:sessions": "node test-apsara.js sessions",
+    "manage": "node scripts/manage-conversations.js",
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint src/**/*.js --fix"
   },
