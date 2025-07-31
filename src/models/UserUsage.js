@@ -10,7 +10,7 @@ const userUsageSchema = new mongoose.Schema({
   },
   subscriptionPlan: {
     type: String,
-    enum: ['guest', 'free', 'premium', 'enterprise'],
+    enum: ['guest', 'free', 'premium'],
     default: 'free',
     index: true
   },
@@ -26,10 +26,6 @@ const userUsageSchema = new mongoose.Schema({
     'gemini-2.5-pro': {
       count: { type: Number, default: 0 },
       limit: { type: Number, default: 5 } // Free: 5/day
-    },
-    'gemini-2.5-flash-lite': {
-      count: { type: Number, default: 0 },
-      limit: { type: Number, default: 30 } // Free: 30/day
     }
   },
   totalUsage: {
@@ -71,23 +67,15 @@ userUsageSchema.statics.getRateLimits = function(subscriptionPlan) {
   const limits = {
     guest: {
       'gemini-2.5-flash': { limit: 5, type: 'total' }, // 5 total messages
-      'gemini-2.5-pro': { limit: 0, type: 'total' }, // No access
-      'gemini-2.5-flash-lite': { limit: 0, type: 'total' } // No access
+      'gemini-2.5-pro': { limit: 0, type: 'total' } // No access
     },
     free: {
       'gemini-2.5-flash': { limit: 20, type: 'daily' },
-      'gemini-2.5-pro': { limit: 5, type: 'daily' },
-      'gemini-2.5-flash-lite': { limit: 30, type: 'daily' }
+      'gemini-2.5-pro': { limit: 5, type: 'daily' }
     },
     premium: {
       'gemini-2.5-flash': { limit: 100, type: 'daily' },
-      'gemini-2.5-pro': { limit: 50, type: 'daily' },
-      'gemini-2.5-flash-lite': { limit: 200, type: 'daily' }
-    },
-    enterprise: {
-      'gemini-2.5-flash': { limit: -1, type: 'unlimited' }, // Unlimited
-      'gemini-2.5-pro': { limit: -1, type: 'unlimited' },
-      'gemini-2.5-flash-lite': { limit: -1, type: 'unlimited' }
+      'gemini-2.5-pro': { limit: 50, type: 'daily' }
     }
   };
   
@@ -108,9 +96,7 @@ userUsageSchema.methods.canMakeRequest = function(model = 'gemini-2.5-flash') {
     return { allowed: false, reason: 'Model not available for your plan' };
   }
 
-  if (modelLimits.type === 'unlimited') {
-    return { allowed: true };
-  }
+
 
   if (this.subscriptionPlan === 'guest') {
     // For guests, check total message limit
@@ -172,8 +158,7 @@ userUsageSchema.methods.resetDailyUsage = function() {
       date: this.dailyUsage.date,
       usage: {
         'gemini-2.5-flash': this.dailyUsage['gemini-2.5-flash']?.count || 0,
-        'gemini-2.5-pro': this.dailyUsage['gemini-2.5-pro']?.count || 0,
-        'gemini-2.5-flash-lite': this.dailyUsage['gemini-2.5-flash-lite']?.count || 0
+        'gemini-2.5-pro': this.dailyUsage['gemini-2.5-pro']?.count || 0
       }
     }
   });
@@ -182,12 +167,10 @@ userUsageSchema.methods.resetDailyUsage = function() {
   this.dailyUsage.date = today;
   this.dailyUsage['gemini-2.5-flash'].count = 0;
   this.dailyUsage['gemini-2.5-pro'].count = 0;
-  this.dailyUsage['gemini-2.5-flash-lite'].count = 0;
 
   // Update limits based on current subscription
   this.dailyUsage['gemini-2.5-flash'].limit = limits['gemini-2.5-flash']?.limit || 20;
   this.dailyUsage['gemini-2.5-pro'].limit = limits['gemini-2.5-pro']?.limit || 5;
-  this.dailyUsage['gemini-2.5-flash-lite'].limit = limits['gemini-2.5-flash-lite']?.limit || 30;
 
   this.lastResetDate = new Date();
 
@@ -215,10 +198,6 @@ userUsageSchema.statics.findOrCreateUsage = async function(userId, subscriptionP
         'gemini-2.5-pro': {
           count: 0,
           limit: limits['gemini-2.5-pro']?.limit || 5
-        },
-        'gemini-2.5-flash-lite': {
-          count: 0,
-          limit: limits['gemini-2.5-flash-lite']?.limit || 30
         }
       }
     });
@@ -240,8 +219,7 @@ userUsageSchema.statics.getUsageStats = async function(userId) {
     guestLimits: usage.guestLimits,
     canMakeRequests: {
       'gemini-2.5-flash': usage.canMakeRequest('gemini-2.5-flash'),
-      'gemini-2.5-pro': usage.canMakeRequest('gemini-2.5-pro'),
-      'gemini-2.5-flash-lite': usage.canMakeRequest('gemini-2.5-flash-lite')
+      'gemini-2.5-pro': usage.canMakeRequest('gemini-2.5-pro')
     },
     lastResetDate: usage.lastResetDate,
     needsDailyReset: usage.needsDailyReset

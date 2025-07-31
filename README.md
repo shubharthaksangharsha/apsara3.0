@@ -24,9 +24,8 @@ A production-ready AI conversation platform with multi-provider support, advance
 ### Rate Limiting & Usage Control
 - ✅ **Intelligent Rate Limiting System**:
   - **Guest**: 5 total messages (gemini-2.5-flash only)
-  - **Free**: 20/day gemini-2.5-flash, 5/day gemini-2.5-pro, 30/day gemini-2.5-flash-lite
-  - **Premium**: 100/day flash, 50/day pro, 200/day lite
-  - **Enterprise**: Unlimited access
+  - **Free**: 20/day gemini-2.5-flash, 5/day gemini-2.5-pro
+  - **Premium**: 100/day gemini-2.5-flash, 50/day gemini-2.5-pro
 - ✅ **Usage Tracking & Analytics** with detailed statistics
 - ✅ **Automatic Daily Reset** at midnight UTC
 - ✅ **Real-time Usage Monitoring** with remaining limits in responses
@@ -52,6 +51,17 @@ A production-ready AI conversation platform with multi-provider support, advance
 - ✅ **Comprehensive Metadata** storage (timing, tokens, config)
 - ✅ **Usage History Tracking** with reset logs
 - ✅ **Guest Session Management** with temporary accounts
+
+### File Management System
+- ✅ **Multi-Storage Architecture** with three upload methods:
+  - **Local Storage**: Files stored in upload folder (permanent, auto-uploaded to Google for AI processing)
+  - **S3 Storage**: Files stored in AWS S3 bucket (scalable, production-ready)
+  - **Google File API**: Direct upload to Google (48h expiry, AI processing optimized)
+- ✅ **Files Array Support** in AI generation with `files=[]` parameter
+- ✅ **Automatic File Handling** with seamless multimodal AI support
+- ✅ **Smart File Processing**: Local files automatically uploaded to Google File API for AI analysis
+- ✅ **File Type Detection** and validation
+- ✅ **Expiry Management** for temporary files
 
 ## 🚀 Latest Performance & Workflow Improvements
 - ✅ **Fixed Password Reset Flow** with proper OTP verification sequence
@@ -82,9 +92,19 @@ A production-ready AI conversation platform with multi-provider support, advance
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/ai/generate` | Generate AI response (auto includes history) |
+| POST | `/ai/generate` | Generate AI response (auto includes history, supports files) |
 | POST | `/ai/edit-message` | Edit message and regenerate response |
+| POST | `/ai/regenerate` | Regenerate specific or last AI response |
 | POST | `/ai/embeddings` | Generate text embeddings |
+
+### File Management Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/files/upload` | Upload files (local/s3/google-file-api) |
+| GET | `/files` | List user's uploaded files |
+| DELETE | `/files/:fileId` | Delete a file |
+| GET | `/files/supported-types` | Get supported file types and storage methods |
 
 ### Plugin Endpoints
 
@@ -130,7 +150,7 @@ curl -X POST http://localhost:5000/api/ai/generate \
   -d '{
     "userId": "guest_user_id",
     "conversationId": "guest_conv_123",
-    "content": "Hello! Explain AI in simple terms.",
+    "contents": "Hello! Explain AI in simple terms.",
     "model": "gemini-2.5-flash"
   }'
 ```
@@ -177,15 +197,60 @@ curl -X POST http://localhost:5000/api/users/google-auth \
   }'
 ```
 
-### AI Generation with Thinking
+### File Upload with Multiple Storage Methods
 
 ```bash
+# Upload to local storage
+curl -X POST http://localhost:5000/api/files/upload \
+  -H "Content-Type: multipart/form-data" \
+  -F "files=@image.jpg" \
+  -F "storageMethod=local" \
+  -F "userId=user_123" \
+  -F "displayName=My Image"
+
+# Upload to Google File API (for AI processing)
+curl -X POST http://localhost:5000/api/files/upload \
+  -H "Content-Type: multipart/form-data" \
+  -F "files=@document.pdf" \
+  -F "storageMethod=google-file-api" \
+  -F "userId=user_123" \
+  -F "displayName=Important Document"
+
+# Upload to S3 (production ready)
+curl -X POST http://localhost:5000/api/files/upload \
+  -H "Content-Type: multipart/form-data" \
+  -F "files=@video.mp4" \
+  -F "storageMethod=s3" \
+  -F "userId=user_123" \
+  -F "displayName=Demo Video"
+```
+
+### Interactive CLI File Upload & Analysis
+
+```bash
+# Run the management CLI
+npm run manage
+
+# Select option 19: Upload file and analyze with AI
+# The CLI will guide you through:
+# 1. File path selection
+# 2. Storage method choice (local/google-file-api)
+# 3. Analysis type selection
+# 4. AI configuration
+# 5. Follow-up questions
+```
+
+### AI Generation with Files and Thinking
+
+```bash
+# Works with ANY storage method - local files automatically uploaded to Google for AI processing
 curl -X POST http://localhost:5000/api/ai/generate \
   -H "Content-Type: application/json" \
   -d '{
     "userId": "user_123",
     "conversationId": "conv_456", 
-    "content": "Explain quantum computing",
+    "contents": "Analyze this image and explain what you see",
+    "files": ["file_local_123", "file_google_456", "gs://bucket/direct-uri"],
     "model": "gemini-2.5-pro",
     "config": {
       "temperature": 0.7,
@@ -196,6 +261,22 @@ curl -X POST http://localhost:5000/api/ai/generate \
       }
     }
   }'
+```
+
+**Response includes automatic file processing logs:**
+```json
+{
+  "success": true,
+  "text": "I can see in this image...",
+  "thoughts": "Let me analyze each file systematically...",
+  "usageMetadata": {
+    "totalTokenCount": 1250
+  },
+  "modelMetadata": {
+    "filesProcessed": 3,
+    "autoUploads": 1
+  }
+}
 ```
 
 ### Plugin Usage (Calculator)
@@ -242,6 +323,7 @@ curl -X POST http://localhost:5000/api/ai/edit-message \
     "conversationId": "conv_456", 
     "messageId": "msg_789",
     "newContent": "Explain machine learning instead",
+    "files": ["file_123456789"],
     "model": "gemini-2.5-flash",
     "config": {
       "temperature": 0.8,
@@ -250,6 +332,41 @@ curl -X POST http://localhost:5000/api/ai/edit-message \
         "includeThoughts": true,
         "thinkingBudget": 1000
       }
+    }
+  }'
+```
+
+### AI Response Regeneration
+
+```bash
+# Regenerate last AI response
+curl -X POST http://localhost:5000/api/ai/regenerate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user_123",
+    "conversationId": "conv_456",
+    "model": "gemini-2.5-pro",
+    "config": {
+      "temperature": 0.5,
+      "maxOutputTokens": 2048,
+      "thinkingConfig": {
+        "includeThoughts": true,
+        "thinkingBudget": 1500
+      }
+    }
+  }'
+
+# Regenerate specific AI response
+curl -X POST http://localhost:5000/api/ai/regenerate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user_123",
+    "conversationId": "conv_456",
+    "messageId": "msg_ai_456",
+    "model": "gemini-2.5-flash",
+    "config": {
+      "temperature": 0.9,
+      "maxOutputTokens": 1024
     }
   }'
 ```
@@ -263,8 +380,9 @@ Explore detailed usage examples and guides:
 - **[Rate Limiting](examples/03-rate-limiting.md)** - Understand usage limits and plans
 - **[Authentication](examples/04-authentication.md)** - All authentication methods
 - **[CLI Usage](examples/05-cli-usage.md)** - Management tool guide
+- **[File Management](examples/06-file-management.md)** - Comprehensive multimodal file handling guide
 
-## 🔧 Management CLI (19 Options)
+## 🔧 Management CLI (21 Options)
 
 Start the interactive management tool:
 
@@ -297,7 +415,9 @@ npm run manage
 16. **Logout current user** - Clear current session
 17. **Database statistics** - Comprehensive usage analytics
 18. **User-specific statistics** - Personal analytics (password protected)
-19. **Exit** - Close the CLI
+19. **Upload file and analyze with AI** - Interactive file upload with multimodal AI analysis
+20. **Regenerate AI response** - Regenerate last or specific AI response with new configuration
+21. **Exit** - Close the CLI
 
 ### Enhanced CLI Features
 
@@ -326,16 +446,74 @@ npm run manage
 - **Database persistence** for all plugin interactions
 - **Simplified configuration** with smart defaults
 
+**File Upload & AI Analysis**:
+- **Interactive file upload** with storage method selection (local/Google File API)
+- **AI analysis options** including describe, extract text, and custom questions
+- **Follow-up question support** for deeper file analysis
+- **Complete workflow** from upload to AI analysis with metadata display
+
+**AI Response Regeneration**:
+- **Regenerate last AI response** with different configuration
+- **Select specific AI response** to regenerate from conversation history
+- **Enhanced configuration options** for regenerated responses
+- **Automatic conversation cleanup** removing subsequent messages
+
+**AI File Analysis Options**:
+- **Option 1: Analyze/describe** - Comprehensive analysis of file content (images, documents, audio)
+- **Option 2: Extract text** - OCR for images, transcription for audio, text extraction from PDFs
+- **Option 3: Custom questions** - Ask specific questions about file content
+- **Option 4: Skip analysis** - Upload only without AI processing
+
 ## 🎯 Rate Limiting System
 
 ### Subscription Tiers
 
-| Plan | gemini-2.5-flash | gemini-2.5-pro | gemini-2.5-flash-lite | Features |
-|------|------------------|------------------|------------------------|----------|
-| **Guest** | 5 total messages | ❌ No access | ❌ No access | 24h session, trial access |
-| **Free** | 20/day | 5/day | 30/day | Full features, daily reset |
-| **Premium** | 100/day | 50/day | 200/day | Priority support, analytics |
-| **Enterprise** | ♾️ Unlimited | ♾️ Unlimited | ♾️ Unlimited | Custom SLA, dedicated support |
+| Plan | gemini-2.5-flash | gemini-2.5-pro | Features |
+|------|------------------|------------------|----------|
+| **Guest** | 5 total messages | ❌ No access | 24h session, trial access |
+| **Free** | 20/day | 5/day | Full features, daily reset |
+| **Premium** | 100/day | 50/day | Priority support, analytics |
+
+## 🏗️ Provider System
+
+### Available Providers
+
+#### Local Provider
+- **Purpose**: Handle local file storage with automatic AI integration
+- **File Storage**: Upload folder on server
+- **AI Processing**: **Automatic upload to Google File API** when files are used with AI
+- **Use Case**: Development, testing, permanent storage with seamless AI
+- **Features**: Fast access, permanent storage, automatic AI compatibility
+
+#### Google Provider  
+- **Purpose**: Google Gemini AI models and services
+- **File Storage**: Google File API (48h expiry)
+- **Use Case**: Production AI processing
+- **Features**: Advanced AI capabilities, multimodal support, direct processing
+
+### 🔄 Automatic File Processing
+
+When you upload files to **local storage** and use them with AI:
+
+1. **File Upload**: File saved to local `uploads/` folder ✅
+2. **AI Request**: When file is referenced in `/api/ai/generate` 🤖
+3. **Auto Upload**: File automatically uploaded to Google File API 📤
+4. **AI Processing**: Google Gemini processes the file seamlessly 🧠
+5. **Response**: You get AI analysis without any extra steps ⚡
+
+**Benefits:**
+- 🏠 **Local Persistence**: Files stay on your server permanently
+- 🤖 **AI Ready**: Works with Google Gemini without manual conversion
+- 🔄 **Transparent**: Happens automatically in the background
+- ⚡ **Fast**: No extra API calls needed from your application
+
+### Storage Methods Comparison
+
+| Method | Storage Location | Persistence | AI Compatible | Use Case |
+|--------|------------------|-------------|---------------|----------|
+| **local** | Server upload folder | Permanent | ✅ **Auto-upload to Google for AI** | Development, permanent storage with AI |
+| **s3** | AWS S3 bucket | Permanent | ⚠️ Manual conversion needed | Production file storage |
+| **google-file-api** | Google File API | 48 hours | ✅ Direct AI processing | AI analysis, temporary processing |
 
 ### Rate Limit Response Example
 
@@ -388,7 +566,7 @@ npm run manage
   email: String (unique),
   password: String (hashed),
   role: String (user/admin/guest),
-  subscriptionPlan: String (guest/free/premium/enterprise),
+  subscriptionPlan: String (guest/free/premium),
   authProvider: String (local/google),
   googleId: String,
   isGuest: Boolean,
@@ -406,8 +584,7 @@ npm run manage
   dailyUsage: {
     date: Date,
     'gemini-2.5-flash': { count: Number, limit: Number },
-    'gemini-2.5-pro': { count: Number, limit: Number },
-    'gemini-2.5-flash-lite': { count: Number, limit: Number }
+    'gemini-2.5-pro': { count: Number, limit: Number }
   },
   guestLimits: {
     totalMessagesLimit: Number,

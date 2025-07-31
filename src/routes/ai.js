@@ -7,6 +7,7 @@ import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
 import UserUsage from '../models/UserUsage.js';
 import User from '../models/User.js';
+import File from '../models/File.js';
 
 const router = express.Router();
 
@@ -37,14 +38,6 @@ function validateThinkingBudget(model, thinkingBudget) {
       return {
         valid: false,
         message: 'Gemini 2.5 Flash thinking budget must be 0 (disabled) or between 1-24576 tokens'
-      };
-    }
-  } else if (model === 'gemini-2.5-flash-lite') {
-    // Flash-Lite can be disabled (0) or 512-24576
-    if (thinkingBudget !== 0 && (thinkingBudget < 512 || thinkingBudget > 24576)) {
-      return {
-        valid: false,
-        message: 'Gemini 2.5 Flash-Lite thinking budget must be 0 (disabled) or between 512-24576 tokens'
       };
     }
   }
@@ -85,6 +78,9 @@ const generateSchema = Joi.object({
     Joi.array().items(Joi.object()),
     Joi.object()
   ).required(),
+  files: Joi.array().items(
+    Joi.string() // File IDs or URIs
+  ).default([]),
   model: Joi.string().default('gemini-2.5-flash'),
   provider: Joi.string().default('google'),
   config: Joi.object({
@@ -120,6 +116,26 @@ const embeddingsSchema = Joi.object({
       'FACT_VERIFICATION',
       'CODE_RETRIEVAL_QUERY'
     )
+  }).default({})
+});
+
+const regenerateSchema = Joi.object({
+  userId: Joi.string().required(),
+  conversationId: Joi.string().required(),
+  messageId: Joi.string().optional(), // If not provided, regenerates last AI message
+  model: Joi.string().default('gemini-2.5-flash'),
+  provider: Joi.string().default('google'),
+  config: Joi.object({
+    temperature: Joi.number().min(0).max(2).default(0.7),
+    maxOutputTokens: Joi.number().min(1).max(8192).default(2048),
+    topP: Joi.number().min(0).max(1),
+    topK: Joi.number().min(1).max(40),
+    systemInstruction: Joi.string(),
+    tools: Joi.array(),
+    thinkingConfig: Joi.object({
+      thinkingBudget: Joi.number().default(-1),
+      includeThoughts: Joi.boolean().default(true)
+    })
   }).default({})
 });
 
@@ -209,6 +225,7 @@ router.post('/generate', asyncHandler(async (req, res) => {
     userId, 
     conversationId, 
     contents, 
+    files,
     model, 
     provider, 
     config, 
@@ -308,18 +325,102 @@ router.post('/generate', asyncHandler(async (req, res) => {
       messages = [...conversationHistory];
     }
 
-    // Add current user message
-    if (typeof contents === 'string') {
-      messages.push({
-        role: 'user',
-        parts: [{ text: contents }]
-      });
-    } else {
-      messages.push({
-        role: 'user',
-        parts: Array.isArray(contents) ? contents : [contents]
-      });
+    // Process files and prepare parts for current user message
+    const messageParts = [];
+    
+    // Add file parts first (if any)
+    if (files && files.length > 0) {
+      for (const fileIdOrUri of files) {
+        try {
+          let fileData;
+          
+          // Check if it's a direct URI (for google-file-api)
+          if (fileIdOrUri.startsWith('gs://') || fileIdOrUri.startsWith('https://generativelanguage.googleapis.com/')) {
+            // Direct Google File API URI
+            fileData = {
+              fileUri: fileIdOrUri
+            };
+          } else {
+            // Look up file by ID
+            const file = await File.findOne({ 
+              fileId: fileIdOrUri, 
+              userId: userId 
+            });
+            
+            if (!file) {
+              console.warn(`File not found: ${fileIdOrUri} for user: ${userId}`);
+              continue;
+            }
+            
+            // Check if file is expired
+            if (file.isExpired()) {
+              console.warn(`File expired: ${fileIdOrUri}`);
+              continue;
+            }
+            
+            // Get appropriate URI based on storage method
+                          if (file.storage.provider === 'google-file-api' && file.aiProviderFile?.fileUri) {
+                fileData = {
+                  fileUri: file.aiProviderFile.fileUri,
+                  mimeType: file.mimeType
+                };
+              } else if (file.storage.provider === 'local' && file.storage.path) {
+                // Automatically upload local file to Google File API for AI processing
+                console.log(`🔄 Uploading local file to Google File API for AI processing: ${fileIdOrUri}`);
+                try {
+                  const uploadResult = await ProviderManager.uploadFile({
+                    provider: 'google',
+                    file: file.storage.path,
+                    config: {
+                      mimeType: file.mimeType,
+                      displayName: `temp_${file.originalName}`,
+                      description: 'Temporary upload for AI processing'
+                    }
+                  });
+
+                  fileData = {
+                    fileUri: uploadResult.uri,
+                    mimeType: file.mimeType
+                  };
+
+                  console.log(`✅ Local file temporarily uploaded to Google File API: ${uploadResult.name}`);
+                } catch (uploadError) {
+                  console.error(`❌ Failed to upload local file to Google File API: ${uploadError.message}`);
+                  continue;
+                }
+              } else if (file.storage.provider === 's3' && file.storage.url) {
+                // For S3, we'd need to download and upload to Google File API first for AI processing
+                console.warn(`S3 files need to be downloaded and uploaded to Google File API first for AI processing: ${fileIdOrUri}`);
+                console.warn(`This requires additional implementation for S3 file download and re-upload`);
+                continue;
+              }
+          }
+          
+          if (fileData) {
+            messageParts.push({
+              fileData: fileData
+            });
+          }
+        } catch (error) {
+          console.error(`Error processing file ${fileIdOrUri}:`, error);
+        }
+      }
     }
+    
+    // Add text content
+    if (typeof contents === 'string') {
+      messageParts.push({ text: contents });
+    } else if (Array.isArray(contents)) {
+      messageParts.push(...contents);
+    } else {
+      messageParts.push(contents);
+    }
+    
+    // Add current user message with files and text
+    messages.push({
+      role: 'user',
+      parts: messageParts
+    });
 
     // Prepare generation config
     const generationConfig = {
@@ -865,6 +966,286 @@ router.post('/edit-message', asyncHandler(async (req, res) => {
 
   } catch (error) {
     console.error('Message Edit Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error.message
+    });
+  }
+}));
+
+/**
+ * @route POST /api/ai/regenerate
+ * @desc Regenerate AI response for a specific message or the last AI message
+ * @access Public
+ */
+router.post('/regenerate', asyncHandler(async (req, res) => {
+  // Validate request
+  const { error, value } = regenerateSchema.validate(req.body);
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      error: 'Validation failed',
+      details: error.details.map(d => d.message)
+    });
+  }
+
+  const {
+    userId,
+    conversationId,
+    messageId,
+    model,
+    provider,
+    config
+  } = value;
+
+  try {
+    // Verify conversation exists
+    const conversation = await Conversation.findOne({ conversationId, userId });
+    if (!conversation) {
+      return res.status(404).json({
+        success: false,
+        error: 'Conversation not found',
+        details: 'Please ensure the conversation exists and belongs to the user'
+      });
+    }
+
+    // Get user and check subscription plan
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    // Check rate limits
+    const userUsage = await UserUsage.findOrCreateUsage(userId, user.subscriptionPlan);
+    const rateLimitCheck = userUsage.canMakeRequest(model);
+    
+    if (!rateLimitCheck.allowed) {
+      return res.status(429).json({
+        success: false,
+        error: 'Rate limit exceeded',
+        details: rateLimitCheck.reason,
+        usageInfo: {
+          subscriptionPlan: user.subscriptionPlan,
+          dailyUsage: userUsage.dailyUsage,
+          guestLimits: userUsage.guestLimits,
+          totalUsage: userUsage.totalUsage
+        }
+      });
+    }
+
+    // Find the message to regenerate
+    let messageToRegenerate;
+    if (messageId) {
+      // Find specific message
+      messageToRegenerate = await Message.findOne({
+        messageId,
+        conversationId,
+        userId,
+        role: 'model'
+      });
+    } else {
+      // Find last AI message in conversation
+      messageToRegenerate = await Message.findOne({
+        conversationId,
+        userId,
+        role: 'model'
+      }).sort({ messageSequence: -1 });
+    }
+
+    if (!messageToRegenerate) {
+      return res.status(404).json({
+        success: false,
+        error: 'Message not found',
+        details: messageId ? 
+          'No AI message found with the specified ID' : 
+          'No AI messages found in this conversation'
+      });
+    }
+
+    // Validate thinking budget if specified
+    if (config.thinkingConfig?.thinkingBudget !== undefined) {
+      const validation = validateThinkingBudget(model, config.thinkingConfig.thinkingBudget);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid thinking budget',
+          details: validation.message
+        });
+      }
+    }
+
+    // Get the user message that preceded this AI message
+    const precedingUserMessage = await Message.findOne({
+      conversationId,
+      userId,
+      role: 'user',
+      messageSequence: { $lt: messageToRegenerate.messageSequence }
+    }).sort({ messageSequence: -1 });
+
+    if (!precedingUserMessage) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot regenerate',
+        details: 'No user message found preceding this AI response'
+      });
+    }
+
+    // Delete all messages after the user message (including the current AI message)
+    const deleteResult = await Message.deleteMany({
+      conversationId,
+      userId,
+      messageSequence: { $gt: precedingUserMessage.messageSequence }
+    });
+
+    // Get conversation history up to the user message
+    const historyMessages = await Message.getConversationHistory(conversationId, false);
+    const conversationHistory = formatConversationHistory(historyMessages);
+
+    // Prepare messages for AI (include history + user message)
+    let messages = [...conversationHistory];
+    messages.push({
+      role: 'user',
+      parts: [{ text: precedingUserMessage.content.text }]
+    });
+
+    // Prepare generation config
+    const generationConfig = {
+      model,
+      temperature: config.temperature,
+      maxOutputTokens: config.maxOutputTokens,
+      topP: config.topP,
+      topK: config.topK,
+      systemInstruction: config.systemInstruction || conversation.config?.rest?.systemInstruction
+    };
+
+    // Add thinking config if specified
+    if (config.thinkingConfig) {
+      generationConfig.thinkingConfig = config.thinkingConfig;
+    }
+
+    // Add tools if specified
+    if (config.tools || conversation.config?.rest?.tools) {
+      generationConfig.tools = config.tools || conversation.config.rest.tools;
+    }
+
+    // Generate new AI response
+    const aiResponse = await ProviderManager.generateContent({
+      provider,
+      contents: messages,
+      config: generationConfig
+    });
+
+    if (!aiResponse.success) {
+      return res.status(500).json({
+        success: false,
+        error: 'AI generation failed',
+        details: aiResponse.error
+      });
+    }
+
+    // Create new model response message
+    const modelMessageSequence = conversation.getNextMessageSequence();
+    await conversation.save();
+
+    const newModelMessage = new Message({
+      messageId: uuidv4(),
+      conversationId,
+      userId,
+      messageSequence: modelMessageSequence,
+      messageType: 'rest',
+      role: 'model',
+      content: {
+        text: aiResponse.text,
+        thoughts: aiResponse.thoughts
+      },
+      config: {
+        rest: generationConfig
+      },
+      status: 'completed',
+      metadata: {
+        timing: {
+          requestTime: new Date(),
+          responseTime: new Date()
+        },
+        tokens: {
+          input: aiResponse.usageMetadata?.promptTokenCount || 0,
+          output: aiResponse.usageMetadata?.candidatesTokenCount || 0,
+          total: aiResponse.usageMetadata?.totalTokenCount || 0
+        },
+        provider: {
+          name: provider,
+          model,
+          apiVersion: aiResponse.apiVersion || '2.5'
+        },
+        regeneration: {
+          originalMessageId: messageToRegenerate.messageId,
+          regeneratedAt: new Date(),
+          reason: 'User regeneration request'
+        }
+      }
+    });
+
+    await newModelMessage.save();
+
+    // Record usage for rate limiting
+    await userUsage.recordUsage(model, aiResponse.usageMetadata?.totalTokenCount || 0);
+
+    // Update conversation stats
+    await conversation.incrementStats('rest', aiResponse.usageMetadata?.totalTokenCount || 0);
+
+    // Prepare enhanced response
+    const response = {
+      success: true,
+      provider,
+      model,
+      conversationId,
+      originalMessage: {
+        messageId: messageToRegenerate.messageId,
+        messageSequence: messageToRegenerate.messageSequence,
+        content: messageToRegenerate.content.text
+      },
+      regeneratedMessage: {
+        messageId: newModelMessage.messageId,
+        messageSequence: newModelMessage.messageSequence,
+        content: aiResponse.text
+      },
+      deletedCount: deleteResult.deletedCount,
+      text: aiResponse.text,
+      thoughts: aiResponse.thoughts,
+      hasThoughtSignatures: aiResponse.hasThoughtSignatures,
+      usageMetadata: {
+        promptTokenCount: aiResponse.usageMetadata?.promptTokenCount || 0,
+        candidatesTokenCount: aiResponse.usageMetadata?.candidatesTokenCount || 0,
+        totalTokenCount: aiResponse.usageMetadata?.totalTokenCount || 0,
+        thoughtsTokenCount: aiResponse.usageMetadata?.thoughtsTokenCount || 0
+      },
+      modelMetadata: {
+        provider,
+        model,
+        apiVersion: aiResponse.apiVersion || '2.5',
+        temperature: config.temperature,
+        maxOutputTokens: config.maxOutputTokens,
+        topP: config.topP,
+        topK: config.topK,
+        systemInstruction: generationConfig.systemInstruction,
+        thinkingConfig: config.thinkingConfig,
+        finishReason: aiResponse.finishReason
+      },
+      conversationStats: {
+        totalMessages: conversation.stats.totalMessages,
+        totalTokens: conversation.stats.totalTokens,
+        messageSequence: conversation.stats.messageSequence
+      }
+    };
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('Message Regenerate Error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',

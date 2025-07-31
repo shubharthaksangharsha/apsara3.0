@@ -5,6 +5,7 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import ProviderManager from '../providers/ProviderManager.js';
+import File from '../models/File.js';
 
 const router = express.Router();
 
@@ -53,18 +54,58 @@ const upload = multer({
 
 // Validation schemas
 const uploadConfigSchema = Joi.object({
-  provider: Joi.string().valid('google').default('google'),
-  mimeType: Joi.string(),
+  storageMethod: Joi.string().valid('local', 's3', 'google-file-api').default('local'),
+  userId: Joi.string().required(),
+  conversationId: Joi.string().optional(),
   displayName: Joi.string(),
   description: Joi.string()
 });
 
 /**
  * @route POST /api/files/upload
- * @desc Upload files to AI provider storage
+ * @desc Upload files using specified storage method
  * @access Public (with rate limiting)
  */
-router.post('/upload', upload.array('files', 10), asyncHandler(async (req, res) => {
+router.post('/upload', (req, res, next) => {
+  upload.array('files', 10)(req, res, (err) => {
+    if (err) {
+      // Handle multer errors
+      let errorMessage = 'File upload failed';
+      let errorCode = 400;
+      
+      if (err instanceof multer.MulterError) {
+        switch (err.code) {
+          case 'LIMIT_FILE_SIZE':
+            const maxSizeMB = Math.round((parseInt(process.env.MAX_FILE_SIZE) || 100 * 1024 * 1024) / 1024 / 1024);
+            errorMessage = `File too large. Maximum file size is ${maxSizeMB}MB`;
+            break;
+          case 'LIMIT_FILE_COUNT':
+            errorMessage = 'Too many files. Maximum 10 files per request';
+            break;
+          case 'LIMIT_UNEXPECTED_FILE':
+            errorMessage = 'Unexpected file field';
+            break;
+          default:
+            errorMessage = `Upload error: ${err.message}`;
+        }
+      } else if (err.message.includes('File type')) {
+        errorMessage = err.message;
+      } else {
+        errorMessage = err.message || 'Unknown upload error';
+      }
+      
+      return res.status(errorCode).json({
+        success: false,
+        error: { 
+          message: errorMessage,
+          code: err.code || 'UPLOAD_ERROR',
+          details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+        }
+      });
+    }
+    next();
+  });
+}, asyncHandler(async (req, res) => {
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({
       success: false,
@@ -82,36 +123,109 @@ router.post('/upload', upload.array('files', 10), asyncHandler(async (req, res) 
     });
   }
 
-  const { provider } = value;
+  const { storageMethod, userId, conversationId, displayName, description } = value;
   const uploadResults = [];
 
   try {
     for (const file of req.files) {
-      const uploadResult = await ProviderManager.uploadFile({
-        provider,
-        file: file.path,
-        config: {
-          mimeType: file.mimetype,
-          displayName: value.displayName || file.originalname,
-          description: value.description
-        }
-      });
+      const fileId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      let fileRecord;
+
+      switch (storageMethod) {
+        case 'local':
+          // Keep file in local upload folder
+          fileRecord = new File({
+            fileId,
+            userId,
+            conversationId,
+            originalName: file.originalname,
+            mimeType: file.mimetype,
+            size: file.size,
+            type: getFileType(file.mimetype),
+            storage: {
+              provider: 'local',
+              path: file.path,
+              url: `/api/files/${fileId}/download`
+            }
+          });
+          break;
+
+        case 's3':
+          // TODO: Implement S3 upload logic
+          // For now, simulate S3 upload
+          const s3Url = `https://your-bucket.s3.amazonaws.com/${fileId}`;
+          fileRecord = new File({
+            fileId,
+            userId,
+            conversationId,
+            originalName: file.originalname,
+            mimeType: file.mimetype,
+            size: file.size,
+            type: getFileType(file.mimetype),
+            storage: {
+              provider: 's3',
+              path: fileId,
+              bucket: process.env.S3_BUCKET || 'apsara-files',
+              url: s3Url
+            }
+          });
+          // Clean up local temp file after S3 upload
+          await fs.unlink(file.path).catch(() => {});
+          break;
+
+        case 'google-file-api':
+          // Upload to Google File API (temporary, 48h expiry)
+          const uploadResult = await ProviderManager.uploadFile({
+            provider: 'google',
+            file: file.path,
+            config: {
+              mimeType: file.mimetype,
+              displayName: displayName || file.originalname,
+              description
+            }
+          });
+
+          fileRecord = new File({
+            fileId,
+            userId,
+            conversationId,
+            originalName: file.originalname,
+            mimeType: file.mimetype,
+            size: file.size,
+            type: getFileType(file.mimetype),
+            storage: {
+              provider: 'google-file-api',
+              path: uploadResult.name,
+              url: uploadResult.uri,
+              expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000) // 48 hours
+            },
+            aiProviderFile: {
+              provider: 'google',
+              fileUri: uploadResult.uri,
+              uploadResponse: uploadResult
+            }
+          });
+          // Clean up local temp file after Google upload
+          await fs.unlink(file.path).catch(() => {});
+          break;
+      }
+
+      await fileRecord.save();
 
       uploadResults.push({
+        fileId: fileRecord.fileId,
         originalName: file.originalname,
-        localPath: file.path,
         size: file.size,
         mimeType: file.mimetype,
-        providerResponse: uploadResult
+        storageMethod,
+        url: fileRecord.getAccessUrl(),
+        expiresAt: fileRecord.storage.expiresAt
       });
-
-      // Clean up local file after upload
-      await fs.unlink(file.path).catch(() => {});
     }
 
     res.json({
       success: true,
-      provider,
+      storageMethod,
       files: uploadResults
     });
   } catch (error) {
@@ -123,13 +237,16 @@ router.post('/upload', upload.array('files', 10), asyncHandler(async (req, res) 
 
 /**
  * @route GET /api/files
- * @desc List uploaded files
+ * @desc List user's uploaded files
  * @access Public
  */
 router.get('/', asyncHandler(async (req, res) => {
   const schema = Joi.object({
-    provider: Joi.string().valid('google').default('google'),
-    pageSize: Joi.number().min(1).max(100).default(20)
+    userId: Joi.string().required(),
+    storageMethod: Joi.string().valid('local', 's3', 'google-file-api'),
+    type: Joi.string().valid('image', 'audio', 'video', 'document', 'other'),
+    pageSize: Joi.number().min(1).max(100).default(20),
+    page: Joi.number().min(1).default(1)
   });
 
   const { error, value } = schema.validate(req.query);
@@ -140,14 +257,39 @@ router.get('/', asyncHandler(async (req, res) => {
     });
   }
 
-  const { provider, pageSize } = value;
+  const { userId, storageMethod, type, pageSize, page } = value;
 
-  const result = await ProviderManager.listFiles({
-    provider,
-    pageSize
+  const query = { userId };
+  if (storageMethod) query['storage.provider'] = storageMethod;
+  if (type) query.type = type;
+
+  const skip = (page - 1) * pageSize;
+  const files = await File.find(query)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(pageSize)
+    .lean();
+
+  const total = await File.countDocuments(query);
+
+  const filesWithUrls = files.map(file => ({
+    ...file,
+    url: file.storage.provider === 's3' ? file.storage.url : 
+         file.storage.provider === 'google-file-api' ? file.storage.url :
+         `/api/files/${file.fileId}/download`,
+    isExpired: file.storage.expiresAt && file.storage.expiresAt < new Date()
+  }));
+
+  res.json({
+    success: true,
+    files: filesWithUrls,
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize)
+    }
   });
-
-  res.json(result);
 }));
 
 /**
@@ -157,17 +299,33 @@ router.get('/', asyncHandler(async (req, res) => {
  */
 router.get('/:fileId', asyncHandler(async (req, res) => {
   const { fileId } = req.params;
-  const { provider = 'google' } = req.query;
+  const { userId } = req.query;
 
-  if (!fileId) {
+  if (!fileId || !userId) {
     return res.status(400).json({
       success: false,
-      error: { message: 'File ID is required' }
+      error: { message: 'File ID and User ID are required' }
     });
   }
 
-  const result = await ProviderManager.getFile(fileId, provider);
-  res.json(result);
+  const file = await File.findOne({ fileId, userId });
+  if (!file) {
+    return res.status(404).json({
+      success: false,
+      error: { message: 'File not found' }
+    });
+  }
+
+  res.json({
+    success: true,
+    file: {
+      ...file,
+      url: file.storage.provider === 's3' ? file.storage.url : 
+           file.storage.provider === 'google-file-api' ? file.storage.url :
+           `/api/files/${file.fileId}/download`,
+      isExpired: file.storage.expiresAt && file.storage.expiresAt < new Date()
+    }
+  });
 }));
 
 /**
@@ -177,17 +335,51 @@ router.get('/:fileId', asyncHandler(async (req, res) => {
  */
 router.delete('/:fileId', asyncHandler(async (req, res) => {
   const { fileId } = req.params;
-  const { provider = 'google' } = req.query;
+  const { userId } = req.query;
 
-  if (!fileId) {
+  if (!fileId || !userId) {
     return res.status(400).json({
       success: false,
-      error: { message: 'File ID is required' }
+      error: { message: 'File ID and User ID are required' }
     });
   }
 
-  const result = await ProviderManager.deleteFile(fileId, provider);
-  res.json(result);
+  const file = await File.findOne({ fileId, userId });
+  if (!file) {
+    return res.status(404).json({
+      success: false,
+      error: { message: 'File not found' }
+    });
+  }
+
+  try {
+    // Delete from storage based on provider
+    switch (file.storage.provider) {
+      case 'local':
+        await fs.unlink(file.storage.path).catch(() => {});
+        break;
+      case 's3':
+        // TODO: Implement S3 deletion
+        console.log(`TODO: Delete S3 file: ${file.storage.path}`);
+        break;
+      case 'google-file-api':
+        if (file.aiProviderFile?.uploadResponse?.name) {
+          await ProviderManager.deleteFile(file.aiProviderFile.uploadResponse.name, 'google');
+        }
+        break;
+    }
+
+    // Delete from database
+    await File.deleteOne({ fileId, userId });
+
+    res.json({
+      success: true,
+      message: 'File deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    throw error;
+  }
 }));
 
 /**
@@ -348,7 +540,7 @@ router.post('/analyze-local', upload.single('file'), asyncHandler(async (req, re
 
 /**
  * @route GET /api/files/supported-types
- * @desc Get supported file types
+ * @desc Get supported file types and storage methods
  * @access Public
  */
 router.get('/supported-types', (req, res) => {
@@ -365,12 +557,40 @@ router.get('/supported-types', (req, res) => {
     ]
   };
 
+  const storageMethods = {
+    local: {
+      description: 'Store files in local upload folder',
+      pros: ['Fast access', 'No external dependencies'],
+      cons: ['Limited by disk space', 'Not scalable across servers']
+    },
+    s3: {
+      description: 'Store files in AWS S3 bucket',
+      pros: ['Scalable', 'Reliable', 'CDN integration'],
+      cons: ['Requires AWS setup', 'Additional cost']
+    },
+    'google-file-api': {
+      description: 'Upload to Google File API (48h expiry, for AI processing)',
+      pros: ['Integrated with Google AI', 'No storage cost'],
+      cons: ['48h expiry', 'Processing only', 'Cannot download']
+    }
+  };
+
   res.json({
     success: true,
     supportedTypes,
+    storageMethods,
     maxFileSize: process.env.MAX_FILE_SIZE || '100MB',
     maxFilesPerRequest: 10
   });
 });
+
+// Helper function to determine file type
+function getFileType(mimeType) {
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.includes('pdf') || mimeType.includes('document') || mimeType.startsWith('text/')) return 'document';
+  return 'other';
+}
 
 export default router; 

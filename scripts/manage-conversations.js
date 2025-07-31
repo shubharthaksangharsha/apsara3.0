@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fetch from 'node-fetch';
+import { FormData, File } from 'formdata-node';
 
 // Load environment variables
 const __filename = fileURLToPath(import.meta.url);
@@ -77,7 +78,9 @@ class ConversationManager {
     console.log('16. Logout current user');
     console.log('17. Database statistics');
     console.log('18. User-specific statistics');
-    console.log('19. Exit');
+    console.log('19. Upload file and analyze with AI');
+    console.log('20. Regenerate AI response');
+    console.log('21. Exit');
     console.log('================================');
     
     if (this.currentUser) {
@@ -88,7 +91,7 @@ class ConversationManager {
     }
     console.log('');
 
-    const choice = await this.question('Enter your choice (1-19): ');
+    const choice = await this.question('Enter your choice (1-21): ');
     return choice.trim();
   }
 
@@ -1533,6 +1536,533 @@ class ConversationManager {
     }
   }
 
+  async uploadFileAndAnalyze() {
+    if (!this.currentUser) {
+      console.log('❌ Please select a user first (option 10)');
+      return;
+    }
+
+    if (!this.currentConversation) {
+      console.log('❌ Please select a conversation first (option 3)');
+      console.log('💡 You can create a new conversation (option 1)');
+      return;
+    }
+
+    try {
+      console.log('\n📁 File Upload & AI Analysis');
+      console.log('=============================');
+      
+      const filePath = await this.question('Enter file path (e.g., ./image.jpg, /path/to/document.pdf): ');
+      
+      // Validate file path input
+      if (!filePath || filePath.trim() === '') {
+        console.log('❌ No file path provided');
+        return;
+      }
+      
+      const cleanFilePath = filePath.trim();
+      console.log(`🔍 Checking file: ${cleanFilePath}`);
+      
+      // Check if file exists and validate size
+      try {
+        const stats = await import('fs').then(fs => fs.promises.stat(cleanFilePath));
+        if (!stats.isFile()) {
+          console.log('❌ Path exists but is not a file (might be a directory)');
+          return;
+        }
+        
+        // Display file information and check size limits
+        const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
+        const fileSizeBytes = stats.size;
+        const maxSizeBytes = parseInt(process.env.MAX_FILE_SIZE) || 100 * 1024 * 1024;
+        const maxSizeMB = Math.round(maxSizeBytes / 1024 / 1024);
+        
+        const path = await import('path');
+        const fileName = path.basename(cleanFilePath);
+        
+        console.log(`\n📊 File Information:`);
+        console.log(`📄 Name: ${fileName}`);
+        console.log(`📏 Size: ${fileSizeMB} MB (${fileSizeBytes.toLocaleString()} bytes)`);
+        console.log(`📋 Server limit: ${maxSizeMB} MB (${maxSizeBytes.toLocaleString()} bytes)`);
+        
+        if (fileSizeBytes > maxSizeBytes) {
+          console.log(`❌ File is too large!`);
+          console.log(`   Your file: ${fileSizeMB} MB`);
+          console.log(`   Maximum allowed: ${maxSizeMB} MB`);
+          console.log(`💡 Solutions:`);
+          console.log(`   • Compress the file (use tools like 7zip, WinRAR)`);
+          console.log(`   • For images: reduce resolution/quality`);
+          console.log(`   • For PDFs: use PDF compressor tools`);
+          console.log(`   • For videos: reduce resolution or use a shorter clip`);
+          console.log(`   • Or ask admin to increase MAX_FILE_SIZE in .env`);
+          return;
+        } else {
+          const percentUsed = ((fileSizeBytes / maxSizeBytes) * 100).toFixed(1);
+          console.log(`✅ File size is within limits (using ${percentUsed}% of allowed size)`);
+        }
+        
+      } catch (error) {
+        console.log('❌ File not found or cannot be accessed');
+        console.log(`📝 Error: ${error.message}`);
+        
+        if (error.code === 'ENOENT') {
+          console.log('💡 File does not exist. Please check:');
+          console.log('   • The file path is correct');
+          console.log('   • The file name is spelled correctly');
+          console.log('   • You have the right file extension');
+          console.log('   • The file is in the expected location');
+        } else if (error.code === 'EACCES') {
+          console.log('💡 Permission denied. Please check:');
+          console.log('   • You have read permissions for the file');
+          console.log('   • The file is not locked by another program');
+        }
+        return;
+      }
+
+      console.log('\n📦 Storage Method:');
+      console.log('==================');
+      console.log('1. Local Storage (permanent, stored on server)');
+      console.log('2. Google File API (48h expiry, optimized for AI processing)');
+      console.log('');
+
+      const storageChoice = await this.question('Choose storage method (1-2): ');
+      let storageMethod;
+
+      switch (storageChoice) {
+        case '1':
+          storageMethod = 'local';
+          break;
+        case '2':
+          storageMethod = 'google-file-api';
+          break;
+        default:
+          console.log('❌ Invalid choice. Using Google File API as default.');
+          storageMethod = 'google-file-api';
+      }
+
+      console.log(`\n📤 Uploading file to ${storageMethod}...`);
+
+      // Create form data for file upload
+      const formData = new FormData();
+      
+      // Read file and create File object with proper MIME type
+      const fs = await import('fs');
+      const path = await import('path');
+      const fileBuffer = await fs.promises.readFile(cleanFilePath);
+      const fileName = path.basename(cleanFilePath);
+      const mimeType = this.getMimeType(fileName);
+      
+      console.log(`📋 Detected file type: ${mimeType}`);
+      
+      const file = new File([fileBuffer], fileName, { type: mimeType });
+      
+      formData.append('files', file);
+      formData.append('storageMethod', storageMethod);
+      formData.append('userId', this.currentUser._id.toString());
+      formData.append('conversationId', this.currentConversation.conversationId);
+      formData.append('displayName', fileName);
+
+      // Upload file
+      const uploadResponse = await fetch('http://localhost:5000/api/files/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      const uploadResult = await uploadResponse.json();
+
+      if (!uploadResult.success) {
+        console.log('❌ File upload failed!');
+        console.log(`📝 Error: ${uploadResult.error?.message || uploadResult.error || 'Unknown error'}`);
+        if (uploadResult.error?.code) {
+          console.log(`🔧 Error Code: ${uploadResult.error.code}`);
+        }
+        if (uploadResult.error?.details) {
+          console.log(`ℹ️  Details: ${uploadResult.error.details}`);
+        }
+        console.log('\n💡 Common solutions:');
+        console.log('   • Check if the file path is correct');
+        console.log('   • Ensure the file is not corrupted');
+        console.log('   • Try a smaller file if size limit exceeded');
+        console.log('   • Check server logs for more details');
+        console.log('   • Restart the server if needed');
+        return;
+      }
+
+      const uploadedFile = uploadResult.files[0];
+      console.log('✅ File uploaded successfully!');
+      console.log(`📁 File ID: ${uploadedFile.fileId}`);
+      console.log(`📦 Storage: ${uploadedFile.storageMethod}`);
+      console.log(`📏 Size: ${(uploadedFile.size / 1024 / 1024).toFixed(2)} MB`);
+      console.log(`🌐 URL: ${uploadedFile.url}`);
+      if (uploadedFile.expiresAt) {
+        console.log(`⏰ Expires: ${new Date(uploadedFile.expiresAt).toLocaleString()}`);
+      }
+
+      // Ask user what they want to know about the file
+      console.log('\n🤖 AI Analysis Options:');
+      console.log('=======================');
+      console.log('1. Analyze/describe the file');
+      console.log('2. Extract text content');
+      console.log('3. Ask custom question about the file');
+      console.log('4. Skip AI analysis');
+      console.log('');
+
+      const analysisChoice = await this.question('Choose analysis option (1-4): ');
+      let analysisPrompt;
+
+      switch (analysisChoice) {
+        case '1':
+          analysisPrompt = 'Please analyze this file and describe what you see in detail. Include any important information, patterns, or insights you can gather.';
+          break;
+        case '2':
+          analysisPrompt = 'Please extract and provide all the text content from this file. If it\'s an image, provide any visible text. If it\'s audio, provide a transcription.';
+          break;
+        case '3':
+          analysisPrompt = await this.question('Enter your question about the file: ');
+          break;
+        case '4':
+          console.log('📁 File uploaded successfully. Skipping AI analysis.');
+          return;
+        default:
+          console.log('❌ Invalid choice. Using default analysis.');
+          analysisPrompt = 'Please analyze this file and describe what you see.';
+      }
+
+      // AI Configuration
+      console.log('\n⚙️ AI Configuration:');
+      console.log('====================');
+      const model = await this.question('Enter model (default: gemini-2.5-flash): ') || 'gemini-2.5-flash';
+      const temperature = parseFloat(await this.question('Enter temperature 0.0-2.0 (default: 0.7): ') || '0.7');
+      const maxTokens = parseInt(await this.question('Enter max output tokens (default: 2048): ') || '2048');
+      
+      // Thinking configuration
+      const useThinking = await this.question('Enable AI thinking? (y/n, default: y): ');
+      let thinkingBudget = -1;
+      let includeThoughts = true;
+      
+      if (useThinking.toLowerCase() !== 'n') {
+        const budgetChoice = await this.question('Thinking budget: (1) Dynamic (-1), (2) Off (0), (3) Custom tokens (default: 1): ') || '1';
+        if (budgetChoice === '2') {
+          thinkingBudget = 0;
+        } else if (budgetChoice === '3') {
+          thinkingBudget = parseInt(await this.question('Enter thinking token budget: '));
+        }
+        includeThoughts = (await this.question('Include thoughts in response? (y/n, default: y): ')).toLowerCase() !== 'n';
+        } else {
+        thinkingBudget = 0;
+        includeThoughts = false;
+      }
+
+      console.log('\n🤖 Analyzing file with AI...');
+
+      // Send to AI for analysis
+      const aiResponse = await fetch('http://localhost:5000/api/ai/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: this.currentUser._id.toString(),
+          conversationId: this.currentConversation.conversationId,
+          contents: analysisPrompt,
+          files: [uploadedFile.fileId], // Use the uploaded file
+          model,
+          config: {
+            temperature,
+            maxOutputTokens: maxTokens,
+            thinkingConfig: {
+              thinkingBudget,
+              includeThoughts
+            }
+          }
+        })
+      });
+
+      const aiResult = await aiResponse.json();
+
+      if (aiResult.success) {
+        console.log('\n✅ AI Analysis Complete!');
+        console.log('========================');
+        console.log(`📁 File: ${fileName}`);
+        console.log(`📝 Your Question: ${analysisPrompt}`);
+        console.log(`🤖 AI Response: ${aiResult.text}`);
+        
+        if (aiResult.thoughts && includeThoughts) {
+          console.log(`🧠 AI Thoughts: ${aiResult.thoughts}`);
+        }
+        
+        console.log('\n📊 Analysis Metadata:');
+        console.log(`🎯 Tokens Used: ${aiResult.usageMetadata?.totalTokenCount || 0} (Input: ${aiResult.usageMetadata?.promptTokenCount || 0}, Output: ${aiResult.usageMetadata?.candidatesTokenCount || 0})`);
+        console.log(`🌡️ Temperature: ${temperature}`);
+        console.log(`🤖 Model: ${model}`);
+        console.log(`🏢 Provider: ${aiResult.provider}`);
+        
+        if (aiResult.hasThoughtSignatures) {
+          console.log(`🧠 Has Thought Signatures: Yes`);
+        }
+
+        // Ask if user wants to ask follow-up questions
+        console.log('\n💬 Follow-up Options:');
+        const followUp = await this.question('Ask another question about this file? (y/n): ');
+        
+        if (followUp.toLowerCase() === 'y') {
+          const followUpQuestion = await this.question('Enter your follow-up question: ');
+          
+          console.log('\n🤖 Processing follow-up question...');
+          
+          const followUpResponse = await fetch('http://localhost:5000/api/ai/generate', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              userId: this.currentUser._id.toString(),
+              conversationId: this.currentConversation.conversationId,
+              contents: followUpQuestion,
+              files: [uploadedFile.fileId],
+              model,
+              config: {
+                temperature,
+                maxOutputTokens: maxTokens,
+                thinkingConfig: {
+                  thinkingBudget,
+                  includeThoughts
+                }
+              }
+            })
+          });
+
+          const followUpResult = await followUpResponse.json();
+          
+          if (followUpResult.success) {
+            console.log('\n✅ Follow-up Analysis Complete!');
+            console.log('===============================');
+            console.log(`📝 Follow-up Question: ${followUpQuestion}`);
+            console.log(`🤖 AI Response: ${followUpResult.text}`);
+            
+            if (followUpResult.thoughts && includeThoughts) {
+              console.log(`🧠 AI Thoughts: ${followUpResult.thoughts}`);
+            }
+          } else {
+            console.log('❌ Follow-up analysis failed:', followUpResult.error);
+          }
+        }
+
+      } else {
+        console.log('❌ AI analysis failed:', aiResult.error);
+        if (aiResult.details) {
+          console.log('Details:', aiResult.details);
+        }
+        }
+        
+      } catch (error) {
+      console.error('❌ Error during file upload and analysis:', error.message);
+    }
+  }
+
+  // Helper function to detect MIME type from file extension
+  getMimeType(fileName) {
+    const ext = fileName.toLowerCase().split('.').pop();
+    const mimeTypes = {
+      // Images
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'png': 'image/png',
+      'gif': 'image/gif',
+      'webp': 'image/webp',
+      'bmp': 'image/bmp',
+      'svg': 'image/svg+xml',
+      
+      // Documents
+      'pdf': 'application/pdf',
+      'doc': 'application/msword',
+      'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'txt': 'text/plain',
+      'csv': 'text/csv',
+      'rtf': 'application/rtf',
+      
+      // Audio
+      'mp3': 'audio/mpeg',
+      'wav': 'audio/wav',
+      'ogg': 'audio/ogg',
+      'aac': 'audio/aac',
+      'm4a': 'audio/mp4',
+      'flac': 'audio/flac',
+      
+      // Video
+      'mp4': 'video/mp4',
+      'avi': 'video/x-msvideo',
+      'mov': 'video/quicktime',
+      'webm': 'video/webm',
+      'mkv': 'video/x-matroska',
+      'wmv': 'video/x-ms-wmv',
+      
+      // Other
+      'json': 'application/json',
+      'xml': 'application/xml',
+      'zip': 'application/zip',
+      'rar': 'application/x-rar-compressed'
+    };
+    
+    return mimeTypes[ext] || 'application/octet-stream';
+  }
+
+  async regenerateResponse() {
+    if (!this.currentUser) {
+      console.log('❌ Please select a user first (option 10)');
+      return;
+    }
+
+    if (!this.currentConversation) {
+      console.log('❌ Please select a conversation first (option 3)');
+      return;
+    }
+
+    try {
+      // Get AI messages from the current conversation
+      const aiMessages = await Message.find({
+        conversationId: this.currentConversation.conversationId,
+        userId: this.currentUser._id.toString(),
+        role: 'model'
+      }).sort({ messageSequence: 1 });
+
+      if (aiMessages.length === 0) {
+        console.log('📭 No AI messages found in this conversation');
+        console.log('💡 Send a message to AI first (option 5)');
+        return;
+      }
+
+      console.log('\n🔄 Regenerate AI Response');
+      console.log('=========================');
+      console.log('1. Regenerate last AI response (default)');
+      console.log('2. Choose specific AI response to regenerate');
+      console.log('');
+
+      const regenerateChoice = await this.question('Choose option (1-2, default: 1): ') || '1';
+      let messageToRegenerate = null;
+
+      if (regenerateChoice === '2') {
+        // Show AI messages for selection
+        console.log('\n🤖 AI Messages in this Conversation:');
+        console.log('===================================');
+        aiMessages.forEach((msg, index) => {
+          console.log(`${index + 1}. (Sequence: ${msg.messageSequence}) ${msg.content.text.substring(0, 100)}${msg.content.text.length > 100 ? '...' : ''}`);
+          console.log(`   🕒 Created: ${msg.createdAt?.toLocaleString()}`);
+          if (msg.metadata?.tokens?.total) {
+            console.log(`   🎯 Tokens: ${msg.metadata.tokens.total}`);
+          }
+          console.log('');
+        });
+
+        const choice = await this.question(`Select an AI message to regenerate (1-${aiMessages.length}): `);
+        const msgIndex = parseInt(choice) - 1;
+
+        if (msgIndex < 0 || msgIndex >= aiMessages.length) {
+          console.log('❌ Invalid selection');
+          return;
+        }
+
+        messageToRegenerate = aiMessages[msgIndex];
+      } else {
+        // Use last AI message
+        messageToRegenerate = aiMessages[aiMessages.length - 1];
+      }
+
+      console.log(`\n📝 Selected Message: ${messageToRegenerate.content.text.substring(0, 150)}${messageToRegenerate.content.text.length > 150 ? '...' : ''}`);
+      console.log(`⚠️  Warning: This will delete all messages after sequence ${messageToRegenerate.messageSequence} and regenerate a new response`);
+      
+      const confirm = await this.question('Continue with regeneration? (y/n): ');
+      if (confirm.toLowerCase() !== 'y') {
+        console.log('❌ Regeneration cancelled');
+        return;
+      }
+
+      // Enhanced configuration for the regenerated response
+      console.log('\n⚙️ Configuration for Regenerated Response:');
+      console.log('==========================================');
+      const model = await this.question('Enter model (default: gemini-2.5-flash): ') || 'gemini-2.5-flash';
+      const temperature = parseFloat(await this.question('Enter temperature 0.0-2.0 (default: 0.7): ') || '0.7');
+      const maxTokens = parseInt(await this.question('Enter max output tokens (default: 2048): ') || '2048');
+      
+      const useThinking = await this.question('Enable AI thinking? (y/n, default: y): ');
+      let thinkingBudget = -1;
+      let includeThoughts = true;
+      
+      if (useThinking.toLowerCase() !== 'n') {
+        const budgetChoice = await this.question('Thinking budget: (1) Dynamic (-1), (2) Off (0), (3) Custom tokens (default: 1): ') || '1';
+        if (budgetChoice === '2') {
+          thinkingBudget = 0;
+        } else if (budgetChoice === '3') {
+          thinkingBudget = parseInt(await this.question('Enter thinking token budget: '));
+        }
+        includeThoughts = (await this.question('Include thoughts in response? (y/n, default: y): ')).toLowerCase() !== 'n';
+      } else {
+        thinkingBudget = 0;
+        includeThoughts = false;
+      }
+
+      console.log('\n🔄 Regenerating AI response...');
+
+      const response = await fetch('http://localhost:5000/api/ai/regenerate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: this.currentUser._id.toString(),
+          conversationId: this.currentConversation.conversationId,
+          messageId: messageToRegenerate.messageId,
+          model,
+          config: {
+            temperature,
+            maxOutputTokens: maxTokens,
+            thinkingConfig: {
+              thinkingBudget,
+              includeThoughts
+            }
+          }
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        console.log('\n✅ AI Response regenerated successfully!');
+        console.log('=====================================');
+        console.log(`🔄 Original Response (${result.originalMessage.messageSequence}): ${result.originalMessage.content.substring(0, 100)}${result.originalMessage.content.length > 100 ? '...' : ''}`);
+        console.log(`🤖 New Response (${result.regeneratedMessage.messageSequence}): ${result.regeneratedMessage.content}`);
+        
+        if (result.thoughts && includeThoughts) {
+          console.log(`🧠 AI Thoughts: ${result.thoughts}`);
+        }
+        
+        console.log(`🗑️ Deleted ${result.deletedCount} subsequent messages`);
+        
+        console.log('\n📊 Response Metadata:');
+        console.log(`🎯 Tokens Used: ${result.usageMetadata?.totalTokenCount || 0} (Input: ${result.usageMetadata?.promptTokenCount || 0}, Output: ${result.usageMetadata?.candidatesTokenCount || 0})`);
+        console.log(`🌡️ Temperature: ${temperature}`);
+        console.log(`🤖 Model: ${result.model}`);
+        console.log(`🏢 Provider: ${result.provider}`);
+        
+        if (result.hasThoughtSignatures) {
+          console.log(`🧠 Has Thought Signatures: Yes`);
+        }
+
+        console.log('\n📈 Conversation Stats:');
+        console.log(`💬 Total Messages: ${result.conversationStats.totalMessages}`);
+        console.log(`🎯 Total Tokens: ${result.conversationStats.totalTokens}`);
+        
+      } else {
+        console.log('❌ Error regenerating response:', result.error);
+        if (result.details) {
+          console.log('Details:', result.details);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error regenerating response:', error.message);
+    }
+  }
+
   async selectUserAtStartup() {
     try {
       const users = await User.find({}).sort({ createdAt: -1 }).limit(20);
@@ -1652,13 +2182,19 @@ class ConversationManager {
             await this.showUserSpecificStatistics();
             break;
           case '19':
+            await this.uploadFileAndAnalyze();
+            break;
+          case '20':
+            await this.regenerateResponse();
+            break;
+          case '21':
             console.log('👋 Goodbye!');
             await this.disconnect();
             rl.close();
             process.exit(0);
             break;
           default:
-            console.log('❌ Invalid choice. Please select 1-19.');
+            console.log('❌ Invalid choice. Please select 1-21.');
         }
 
         // Wait for user to press enter before showing menu again

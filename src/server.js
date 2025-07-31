@@ -73,8 +73,11 @@ class ApsaraServer {
     // General middleware
     this.app.use(compression());
     this.app.use(morgan('combined'));
-    this.app.use(express.json({ limit: '10mb' }));
-    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+    
+    // Increase body size limits to support large file uploads
+    const bodyLimit = process.env.MAX_BODY_SIZE || '100mb';
+    this.app.use(express.json({ limit: bodyLimit }));
+    this.app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 
     // Rate limiting
     this.app.use(rateLimiter);
