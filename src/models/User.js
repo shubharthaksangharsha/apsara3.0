@@ -62,13 +62,34 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['user', 'admin'],
+    enum: ['user', 'admin', 'guest'],
     default: 'user'
   },
   subscriptionPlan: { 
     type: String, 
-    enum: ['Guest', 'Free', 'Pro'], 
-    default: 'Free' 
+    enum: ['guest', 'free', 'premium', 'enterprise'], 
+    default: 'free' 
+  },
+  // OAuth and authentication provider fields
+  googleId: {
+    type: String,
+    default: null,
+    sparse: true // Allows multiple null values
+  },
+  authProvider: {
+    type: String,
+    enum: ['local', 'google'],
+    default: 'local'
+  },
+  // Guest user fields
+  isGuest: {
+    type: Boolean,
+    default: false
+  },
+  guestSessionId: {
+    type: String,
+    default: null,
+    sparse: true
   },
   preferences: {
     theme: {

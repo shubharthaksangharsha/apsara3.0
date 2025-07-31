@@ -1,8 +1,10 @@
 import express from 'express';
 import User from '../models/User.js';
+import UserUsage from '../models/UserUsage.js';
 import emailService from '../services/emailService.js';
 import Joi from 'joi';
 import jwt from 'jsonwebtoken';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
 
@@ -26,6 +28,15 @@ const forgotPasswordSchema = Joi.object({
 const resetPasswordSchema = Joi.object({
   token: Joi.string().required(),
   password: Joi.string().min(6).required()
+});
+
+const guestLoginSchema = Joi.object({
+  sessionId: Joi.string().optional()
+});
+
+const googleAuthSchema = Joi.object({
+  idToken: Joi.string().required(),
+  accessToken: Joi.string().optional()
 });
 
 // Auth middleware
@@ -219,42 +230,87 @@ router.post('/login', async (req, res) => {
     }
   });
 
-// Guest login (creates/logs in test user)
+// Guest login - creates a temporary user with limited access
 router.post('/guest-login', async (req, res) => {
   try {
-    let guestUser = await User.findOne({ email: 'guest@apsara.ai' });
-    
-    if (!guestUser) {
-      // Create guest user if it doesn't exist
-      guestUser = new User({
-        fullName: 'Test User',
-        email: 'guest@apsara.ai',
-        password: 'guest123', // This will be hashed
-        isEmailVerified: true,
-        role: 'user',
-        subscriptionPlan: 'Guest'
+    const { error, value } = guestLoginSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        details: error.details[0].message
       });
-      await guestUser.save();
     }
 
-    // Generate auth token
-    const token = guestUser.generateAuthToken();
+    const { sessionId } = value;
+    let guestUser;
 
-  res.json({
-    success: true,
-      message: 'Guest login successful',
+    // Check if guest user already exists for this session
+    if (sessionId) {
+      guestUser = await User.findOne({ 
+        email: { $regex: `^guest-${sessionId}@` },
+        subscriptionPlan: 'guest'
+      });
+    }
+
+    if (!guestUser) {
+      // Create new guest user
+      const guestId = sessionId || uuidv4().split('-')[0];
+      const guestEmail = `guest-${guestId}@apsara.local`;
+      
+      guestUser = new User({
+        fullName: `Guest User ${guestId}`,
+        email: guestEmail,
+        password: uuidv4(), // Random password
+        subscriptionPlan: 'guest',
+        role: 'guest',
+        isEmailVerified: true, // Guests don't need email verification
+        isGuest: true,
+        guestSessionId: guestId
+      });
+
+      await guestUser.save();
+
+      // Create usage tracking for guest
+      await UserUsage.findOrCreateUsage(guestUser._id, 'guest');
+    }
+
+    // Create JWT token
+    const token = jwt.sign(
+      { 
+        id: guestUser._id,
+        email: guestUser.email,
+        role: guestUser.role,
+        isGuest: true
+      },
+      process.env.JWT_SECRET || 'default-secret-key',
+      { expiresIn: '24h' } // Guest sessions expire in 24 hours
+    );
+
+    // Get usage information
+    const userUsage = await UserUsage.findOne({ userId: guestUser._id });
+    
+    res.json({
+      success: true,
+      message: 'Guest session created successfully',
       data: {
+        token,
         user: {
           id: guestUser._id,
           fullName: guestUser.fullName,
           email: guestUser.email,
-          isEmailVerified: guestUser.isEmailVerified,
           role: guestUser.role,
-          preferences: guestUser.preferences,
-          usage: guestUser.usage
+          subscriptionPlan: guestUser.subscriptionPlan,
+          isGuest: true,
+          sessionId: guestUser.guestSessionId
         },
-        token,
-        isGuest: true
+        limitations: {
+          totalMessagesLimit: 5,
+          totalMessagesUsed: userUsage?.guestLimits?.totalMessagesUsed || 0,
+          remainingMessages: 5 - (userUsage?.guestLimits?.totalMessagesUsed || 0),
+          availableModels: ['gemini-2.5-flash'],
+          sessionDuration: '24 hours'
+        }
       }
     });
 
@@ -263,6 +319,133 @@ router.post('/guest-login', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error during guest login'
+    });
+  }
+});
+
+// Google OAuth login
+router.post('/google-auth', async (req, res) => {
+  try {
+    const { error, value } = googleAuthSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        details: error.details[0].message
+      });
+    }
+
+    const { idToken, accessToken } = value;
+
+    // Note: In a real implementation, you would verify the Google ID token
+    // using Google's token verification service. For now, we'll simulate this.
+    
+    // Placeholder for Google token verification
+    // const googleUser = await verifyGoogleToken(idToken);
+    
+    // For demo purposes, we'll create a mock Google user response
+    // In production, replace this with actual Google API verification
+    const mockGoogleUser = {
+      sub: 'google_' + Math.random().toString(36).substr(2, 9),
+      email: req.body.email || 'user@gmail.com',
+      name: req.body.name || 'Google User',
+      picture: req.body.picture || null,
+      email_verified: true
+    };
+
+    if (!mockGoogleUser.email_verified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Google account email not verified'
+      });
+    }
+
+    // Check if user already exists
+    let user = await User.findOne({ 
+      $or: [
+        { email: mockGoogleUser.email.toLowerCase() },
+        { googleId: mockGoogleUser.sub }
+      ]
+    });
+
+    if (!user) {
+      // Create new user from Google account
+      user = new User({
+        fullName: mockGoogleUser.name,
+        email: mockGoogleUser.email.toLowerCase(),
+        password: uuidv4(), // Random password (won't be used)
+        subscriptionPlan: 'free',
+        role: 'user',
+        isEmailVerified: true, // Google accounts are pre-verified
+        googleId: mockGoogleUser.sub,
+        profilePicture: mockGoogleUser.picture,
+        authProvider: 'google'
+      });
+
+      await user.save();
+
+      // Create usage tracking
+      await UserUsage.findOrCreateUsage(user._id, 'free');
+
+      // Send welcome email
+      try {
+        await emailService.sendWelcomeEmail(user.email, user.fullName);
+      } catch (emailError) {
+        console.error('Failed to send welcome email:', emailError);
+      }
+    } else {
+      // Update existing user with Google info if needed
+      if (!user.googleId) {
+        user.googleId = mockGoogleUser.sub;
+        user.authProvider = 'google';
+        if (mockGoogleUser.picture && !user.profilePicture) {
+          user.profilePicture = mockGoogleUser.picture;
+        }
+        await user.save();
+      }
+    }
+
+    // Create JWT token
+    const token = jwt.sign(
+      { 
+        id: user._id,
+        email: user.email,
+        role: user.role
+      },
+      process.env.JWT_SECRET || 'default-secret-key',
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    );
+
+    // Get usage information
+    const userUsage = await UserUsage.findOne({ userId: user._id });
+    
+    res.json({
+      success: true,
+      message: user.isNew ? 'Account created and logged in successfully' : 'Logged in successfully',
+      data: {
+        token,
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          role: user.role,
+          subscriptionPlan: user.subscriptionPlan,
+          profilePicture: user.profilePicture,
+          authProvider: user.authProvider
+        },
+        usageInfo: userUsage ? {
+          dailyUsage: userUsage.dailyUsage,
+          totalUsage: userUsage.totalUsage,
+          subscriptionPlan: userUsage.subscriptionPlan
+        } : null
+      }
+    });
+
+  } catch (error) {
+    console.error('Google auth error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during Google authentication'
     });
   }
 });
@@ -571,6 +754,50 @@ router.post('/forgot-password', async (req, res) => {
   }
 });
 
+// Verify password reset OTP (separate endpoint for two-step verification)
+router.post('/verify-reset-otp', async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and OTP are required'
+      });
+    }
+
+    // Find user and verify OTP
+    const user = await User.findOne({ 
+      email: email.toLowerCase(),
+      passwordResetToken: otp,
+      passwordResetExpires: { $gt: Date.now() }
+    });
+    
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'OTP verified successfully! You can now set a new password.',
+      data: {
+        email: user.email,
+        otpVerified: true
+      }
+    });
+
+  } catch (error) {
+    console.error('OTP verification error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
 // Verify password reset OTP and set new password
 router.post('/reset-password-otp', async (req, res) => {
   try {
@@ -619,9 +846,22 @@ router.post('/reset-password-otp', async (req, res) => {
 
   } catch (error) {
     console.error('Password reset error:', error);
+    
+    // Provide more specific error messages
+    let errorMessage = 'Internal server error';
+    
+    if (error.name === 'ValidationError') {
+      errorMessage = 'Password validation failed';
+    } else if (error.name === 'MongoError' || error.name === 'MongooseError') {
+      errorMessage = 'Database error occurred';
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

@@ -8,9 +8,6 @@ import Message from '../models/Message.js';
 
 const router = express.Router();
 
-// In-memory storage for plugin responses (in production, use Redis or database)
-const pluginResponses = new Map();
-
 // Plugin definitions
 const plugins = {
   google: {
@@ -60,6 +57,7 @@ const pluginExecutionSchema = Joi.object({
   conversationId: Joi.string().required(),
   parameters: Joi.object().required(),
   sendToModel: Joi.boolean().default(false),
+  runAsync: Joi.boolean().default(false),
   modelConfig: Joi.object({
     model: Joi.string().default('gemini-2.5-flash'),
     provider: Joi.string().default('google'),
@@ -77,23 +75,7 @@ const pluginExecutionSchema = Joi.object({
   }).when('sendToModel', { is: true, then: Joi.required() })
 });
 
-const functionCallSchema = Joi.object({
-  userId: Joi.string().required(),
-  conversationId: Joi.string().required(),
-  provider: Joi.string().default('google'),
-  functions: Joi.array().items(Joi.object({
-    name: Joi.string().required(),
-    parameters: Joi.object().required()
-  })).required(),
-  modelConfig: Joi.object({
-    model: Joi.string().default('gemini-2.5-flash'),
-    temperature: Joi.number().min(0).max(2).default(0.7),
-    maxOutputTokens: Joi.number().min(1).max(8192).default(2048),
-    includeConversationHistory: Joi.boolean().default(true),
-    maxHistoryMessages: Joi.number().min(1).max(50).default(10),
-    systemInstruction: Joi.string()
-  }).required()
-});
+
 
 // Plugin execution functions
 const pluginExecutors = {
@@ -345,7 +327,7 @@ router.post('/:provider/:plugin/send', asyncHandler(async (req, res) => {
     });
   }
 
-  const { userId, conversationId, parameters, sendToModel, modelConfig } = value;
+  const { userId, conversationId, parameters, sendToModel, runAsync, modelConfig } = value;
 
   // Check if plugin exists
   if (!plugins[provider] || !plugins[provider][plugin]) {
@@ -367,7 +349,134 @@ router.post('/:provider/:plugin/send', asyncHandler(async (req, res) => {
   }
 
   try {
-    // Execute plugin
+    // Handle async execution
+    if (runAsync) {
+      const taskId = uuidv4();
+      
+      // Start async execution
+      setImmediate(async () => {
+        try {
+          const pluginResult = pluginExecutors[plugin](parameters);
+          
+          // Create plugin message in database
+          const pluginMessage = await createPluginMessage(
+            conversationId, 
+            userId, 
+            plugin, 
+            parameters, 
+            pluginResult, 
+            false
+          );
+
+          // If sendToModel is true, also send to AI and store response
+          if (sendToModel && modelConfig) {
+            try {
+              // Get conversation history for AI context
+              const historyMessages = await Message.getConversationHistory(conversationId, false);
+              const conversationHistory = formatConversationHistory(historyMessages, false);
+
+              // Prepare messages for AI
+              let messages = [...conversationHistory];
+              
+              // Add plugin result as context
+              messages.push({
+                role: 'user',
+                parts: [{
+                  text: `Plugin "${plugin}" execution result: ${JSON.stringify(pluginResult, null, 2)}\n\nPlease analyze this result and provide insights or explanations.`
+                }]
+              });
+
+              // Generate AI response
+              const aiResponse = await ProviderManager.generateContent({
+                provider: modelConfig.provider,
+                contents: messages,
+                config: {
+                  model: modelConfig.model,
+                  temperature: modelConfig.temperature,
+                  maxOutputTokens: modelConfig.maxOutputTokens,
+                  topP: modelConfig.topP,
+                  topK: modelConfig.topK,
+                  systemInstruction: modelConfig.systemInstruction || conversation.config?.rest?.systemInstruction,
+                  thinkingConfig: modelConfig.thinkingConfig
+                }
+              });
+
+              if (aiResponse.success) {
+                // Create AI response message
+                const aiMessageSequence = conversation.getNextMessageSequence();
+                await conversation.save();
+
+                const aiMessage = new Message({
+                  messageId: uuidv4(),
+                  conversationId,
+                  userId,
+                  messageSequence: aiMessageSequence,
+                  messageType: 'rest',
+                  role: 'model',
+                  content: {
+                    text: aiResponse.text,
+                    thoughts: aiResponse.thoughts
+                  },
+                  config: {
+                    rest: modelConfig
+                  },
+                  status: 'completed',
+                  metadata: {
+                    timing: {
+                      requestTime: new Date(),
+                      responseTime: new Date()
+                    },
+                    tokens: {
+                      input: aiResponse.usageMetadata?.promptTokenCount || 0,
+                      output: aiResponse.usageMetadata?.candidatesTokenCount || 0,
+                      total: aiResponse.usageMetadata?.totalTokenCount || 0
+                    },
+                    provider: {
+                      name: modelConfig.provider,
+                      model: modelConfig.model,
+                      apiVersion: aiResponse.apiVersion || '2.5'
+                    },
+                    config: {
+                      temperature: modelConfig.temperature,
+                      maxOutputTokens: modelConfig.maxOutputTokens,
+                      systemInstruction: modelConfig.systemInstruction || conversation.config?.rest?.systemInstruction,
+                      thinkingConfig: modelConfig.thinkingConfig
+                    }
+                  }
+                });
+
+                await aiMessage.save();
+                await conversation.incrementStats('rest', aiResponse.usageMetadata?.totalTokenCount || 0);
+                
+                console.log(`✅ Async plugin ${plugin} completed with AI response (taskId: ${taskId})`);
+              } else {
+                console.log(`⚠️ Async plugin ${plugin} completed but AI response failed (taskId: ${taskId}):`, aiResponse.error);
+              }
+            } catch (aiError) {
+              console.error(`❌ Async plugin ${plugin} AI processing failed (taskId: ${taskId}):`, aiError);
+            }
+          }
+
+          console.log(`✅ Async plugin ${plugin} completed with taskId: ${taskId}`);
+        } catch (error) {
+          console.error(`❌ Async plugin ${plugin} failed with taskId: ${taskId}`, error);
+        }
+      });
+
+      // Return immediately with task ID
+      return res.json({
+        success: true,
+        plugin,
+        provider,
+        conversationId,
+        taskId,
+        status: 'started',
+        message: 'Plugin execution started asynchronously',
+        runAsync: true
+      });
+    }
+
+    // Synchronous execution (existing behavior)
     const pluginResult = pluginExecutors[plugin](parameters);
     
     // Create plugin message in database
@@ -380,23 +489,6 @@ router.post('/:provider/:plugin/send', asyncHandler(async (req, res) => {
       false
     );
 
-    // Store in temporary storage for response endpoint
-    const responseId = uuidv4();
-    pluginResponses.set(responseId, {
-      plugin,
-      provider,
-      parameters,
-      result: pluginResult,
-      timestamp: new Date(),
-      messageId: pluginMessage.messageId
-    });
-
-    // Clean up old responses (keep only last 100)
-    if (pluginResponses.size > 100) {
-      const firstKey = pluginResponses.keys().next().value;
-      pluginResponses.delete(firstKey);
-    }
-
     let response = {
       success: true,
       plugin,
@@ -405,8 +497,8 @@ router.post('/:provider/:plugin/send', asyncHandler(async (req, res) => {
       messageId: pluginMessage.messageId,
       messageSequence: pluginMessage.messageSequence,
       result: pluginResult,
-      responseId,
-      sendToModel
+      sendToModel,
+      runAsync: false
     };
 
     // Send to model if requested
@@ -546,302 +638,8 @@ router.post('/:provider/:plugin/send', asyncHandler(async (req, res) => {
   }
 }));
 
-/**
- * @swagger
- * /api/plugins/{provider}/{plugin}/response:
- *   get:
- *     summary: Get plugin response by ID
- *     description: Retrieve a stored plugin response
- *     tags: [Plugins]
- *     parameters:
- *       - in: path
- *         name: provider
- *         required: true
- *         schema:
- *           type: string
- *       - in: path
- *         name: plugin
- *         required: true
- *         schema:
- *           type: string
- *       - in: query
- *         name: responseId
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Response retrieved successfully
- *       404:
- *         description: Response not found
- */
-router.get('/:provider/:plugin/response', asyncHandler(async (req, res) => {
-  const { responseId } = req.query;
-  
-  if (!responseId) {
-    return res.status(400).json({
-      success: false,
-      error: 'Response ID is required'
-    });
-  }
 
-  const response = pluginResponses.get(responseId);
-  if (!response) {
-    return res.status(404).json({
-      success: false,
-      error: 'Response not found or expired'
-    });
-  }
 
-  res.json({
-    success: true,
-    ...response
-  });
-}));
 
-/**
- * @swagger
- * /api/plugins/function-call:
- *   post:
- *     summary: Execute multiple plugins via function calling
- *     description: Execute plugins using the function calling pattern and send results to AI model
- *     tags: [Plugins]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - userId
- *               - conversationId
- *               - functions
- *               - modelConfig
- *             properties:
- *               userId:
- *                 type: string
- *               conversationId:
- *                 type: string
- *               provider:
- *                 type: string
- *                 default: google
- *               functions:
- *                 type: array
- *                 items:
- *                   type: object
- *                   properties:
- *                     name:
- *                       type: string
- *                     parameters:
- *                       type: object
- *               modelConfig:
- *                 type: object
- *     responses:
- *       200:
- *         description: Function calls executed successfully
- */
-router.post('/function-call', asyncHandler(async (req, res) => {
-  const { error, value } = functionCallSchema.validate(req.body);
-  if (error) {
-    return res.status(400).json({
-      success: false,
-      error: 'Validation failed',
-      details: error.details.map(d => d.message)
-    });
-  }
-
-  const { userId, conversationId, provider, functions, modelConfig } = value;
-
-  // Verify conversation exists
-  const conversation = await Conversation.findOne({ conversationId, userId });
-  if (!conversation) {
-    return res.status(404).json({
-      success: false,
-      error: 'Conversation not found'
-    });
-  }
-
-  try {
-    const functionResults = [];
-
-    // Execute all functions
-    for (const func of functions) {
-      const { name, parameters } = func;
-      
-      if (!plugins[provider] || !plugins[provider][name]) {
-        functionResults.push({
-          name,
-          success: false,
-          error: `Plugin ${name} not found`
-        });
-        continue;
-      }
-
-      try {
-        const result = pluginExecutors[name](parameters);
-        
-        // Create plugin message
-        const pluginMessage = await createPluginMessage(
-          conversationId,
-          userId,
-          name,
-          parameters,
-          result,
-          true
-        );
-
-        functionResults.push({
-          name,
-          success: true,
-          result,
-          messageId: pluginMessage.messageId,
-          messageSequence: pluginMessage.messageSequence
-        });
-      } catch (execError) {
-        functionResults.push({
-          name,
-          success: false,
-          error: execError.message
-        });
-      }
-    }
-
-    // Prepare function call results for AI
-    const toolResponses = functionResults.map(result => ({
-      functionResponse: {
-        name: result.name,
-        response: result.success ? result.result : { error: result.error }
-      }
-    }));
-
-    // Get conversation history
-    let conversationHistory = [];
-    if (modelConfig.includeConversationHistory) {
-      const historyMessages = await Message.find({
-        conversationId,
-        role: { $in: ['user', 'model'] },
-        status: 'completed',
-        isVisible: true
-      })
-      .sort({ messageSequence: 1 })
-      .limit(modelConfig.maxHistoryMessages)
-      .select('role content.text');
-
-      conversationHistory = formatConversationHistory(historyMessages);
-    }
-
-    // Add function results to conversation
-    const messages = [...conversationHistory];
-    messages.push({
-      role: 'model',
-      parts: toolResponses
-    });
-
-    // Generate AI response
-    const aiResponse = await ProviderManager.generateContent({
-      provider: modelConfig.provider,
-      contents: messages,
-      config: {
-        model: modelConfig.model,
-        temperature: modelConfig.temperature,
-        maxOutputTokens: modelConfig.maxOutputTokens,
-        topP: modelConfig.topP,
-        topK: modelConfig.topK,
-        systemInstruction: modelConfig.systemInstruction || conversation.config?.rest?.systemInstruction,
-        thinkingConfig: modelConfig.thinkingConfig
-      }
-    });
-
-    let response = {
-      success: true,
-      conversationId,
-      functionResults,
-      totalFunctions: functions.length,
-      successfulFunctions: functionResults.filter(r => r.success).length
-    };
-
-    if (aiResponse.success) {
-      // Create AI response message
-      const aiMessageSequence = conversation.getNextMessageSequence();
-      await conversation.save();
-
-      const aiMessage = new Message({
-        messageId: uuidv4(),
-        conversationId,
-        userId,
-        messageSequence: aiMessageSequence,
-        messageType: 'rest',
-        role: 'model',
-        content: {
-          text: aiResponse.text,
-          thoughts: aiResponse.thoughts
-        },
-        config: {
-          rest: modelConfig
-        },
-        status: 'completed',
-        metadata: {
-          timing: {
-            requestTime: new Date(),
-            responseTime: new Date()
-          },
-          tokens: {
-            input: aiResponse.usageMetadata?.promptTokenCount || 0,
-            output: aiResponse.usageMetadata?.candidatesTokenCount || 0,
-            total: aiResponse.usageMetadata?.totalTokenCount || 0
-          },
-          provider: {
-            name: modelConfig.provider,
-            model: modelConfig.model
-          }
-        }
-      });
-
-      await aiMessage.save();
-      await conversation.incrementStats('rest', aiResponse.usageMetadata?.totalTokenCount || 0);
-
-      response.aiResponse = {
-        messageId: aiMessage.messageId,
-        messageSequence: aiMessage.messageSequence,
-        content: aiResponse.text,
-        thoughts: aiResponse.thoughts,
-        hasThoughtSignatures: aiResponse.hasThoughtSignatures || false,
-        tokenUsage: {
-          promptTokenCount: aiResponse.usageMetadata?.promptTokenCount || 0,
-          candidatesTokenCount: aiResponse.usageMetadata?.candidatesTokenCount || 0,
-          totalTokenCount: aiResponse.usageMetadata?.totalTokenCount || 0,
-          thoughtsTokenCount: aiResponse.usageMetadata?.thoughtsTokenCount || 0
-        },
-        modelMetadata: {
-          provider: modelConfig.provider,
-          model: modelConfig.model,
-          apiVersion: aiResponse.apiVersion || '2.5',
-          temperature: modelConfig.temperature,
-          maxOutputTokens: modelConfig.maxOutputTokens,
-          topP: modelConfig.topP,
-          topK: modelConfig.topK,
-          systemInstruction: modelConfig.systemInstruction || conversation.config?.rest?.systemInstruction,
-          thinkingConfig: modelConfig.thinkingConfig,
-          finishReason: aiResponse.finishReason
-        }
-      };
-    } else {
-      response.aiResponse = {
-        error: 'Failed to generate AI response',
-        details: aiResponse.error
-      };
-    }
-
-    res.json(response);
-
-  } catch (error) {
-    console.error('Function call error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Function call execution failed',
-      details: error.message
-    });
-  }
-}));
 
 export default router; 

@@ -5,6 +5,8 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import ProviderManager from '../providers/ProviderManager.js';
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
+import UserUsage from '../models/UserUsage.js';
+import User from '../models/User.js';
 
 const router = express.Router();
 
@@ -95,11 +97,6 @@ const generateSchema = Joi.object({
     thinkingConfig: Joi.object({
       thinkingBudget: Joi.number().default(-1),
       includeThoughts: Joi.boolean().default(true)
-    }),
-    conversationHistory: Joi.object({
-      include: Joi.boolean().default(true),
-      maxMessages: Joi.number().min(1).max(100).default(20),
-      includeThoughts: Joi.boolean().default(false)
     })
   }).default({}),
   stream: Joi.boolean().default(false)
@@ -229,6 +226,33 @@ router.post('/generate', asyncHandler(async (req, res) => {
       });
     }
 
+    // Get user and check subscription plan
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    // Check rate limits
+    const userUsage = await UserUsage.findOrCreateUsage(userId, user.subscriptionPlan);
+    const rateLimitCheck = userUsage.canMakeRequest(model);
+    
+    if (!rateLimitCheck.allowed) {
+      return res.status(429).json({
+        success: false,
+        error: 'Rate limit exceeded',
+        details: rateLimitCheck.reason,
+        usageInfo: {
+          subscriptionPlan: user.subscriptionPlan,
+          dailyUsage: userUsage.dailyUsage,
+          guestLimits: userUsage.guestLimits,
+          totalUsage: userUsage.totalUsage
+        }
+      });
+    }
+
     // Validate thinking budget if specified
     if (config.thinkingConfig?.thinkingBudget !== undefined) {
       const validation = validateThinkingBudget(model, config.thinkingConfig.thinkingBudget);
@@ -241,18 +265,9 @@ router.post('/generate', asyncHandler(async (req, res) => {
       }
     }
 
-    // Get conversation history if requested
-    let conversationHistory = [];
-    if (config.conversationHistory?.include) {
-      const historyMessages = await Message.getConversationHistory(
-        conversationId,
-        config.conversationHistory.includeThoughts
-      );
-      conversationHistory = formatConversationHistory(
-        historyMessages.slice(-config.conversationHistory.maxMessages),
-        config.conversationHistory.includeThoughts
-      );
-    }
+    // Always get conversation history for context
+    const historyMessages = await Message.getConversationHistory(conversationId, false);
+    const conversationHistory = formatConversationHistory(historyMessages, false);
 
     // Get next message sequence
     const messageSequence = conversation.getNextMessageSequence();
@@ -381,6 +396,9 @@ router.post('/generate', asyncHandler(async (req, res) => {
 
     await modelMessage.save();
 
+    // Record usage for rate limiting
+    await userUsage.recordUsage(model, aiResponse.usageMetadata?.totalTokenCount || 0);
+
     // Update conversation stats
     await conversation.incrementStats('rest', aiResponse.usageMetadata?.totalTokenCount || 0);
 
@@ -422,9 +440,9 @@ router.post('/generate', asyncHandler(async (req, res) => {
         finishReason: aiResponse.finishReason
       },
       conversationHistory: {
-        included: config.conversationHistory?.include || false,
+        included: true,
         messageCount: conversationHistory.length,
-        maxMessages: config.conversationHistory?.maxMessages || 0
+        totalHistoryMessages: historyMessages.length
       },
       conversationStats: {
         totalMessages: conversation.stats.totalMessages,

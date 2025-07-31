@@ -1,770 +1,674 @@
-# 🚀 Apsara AI Backend
+# Apsara AI Backend
 
-Apsara is a comprehensive AI backend built with Node.js/Express that serves as a multimodal AI wrapper with a focus on REST API providers. It provides a unified interface for multiple AI providers (currently Google Gemini) with advanced features like thinking capabilities, plugin system, and real-time conversation management.
+A production-ready AI conversation platform with multi-provider support, advanced rate limiting, comprehensive authentication, and powerful plugin system.
 
-## 🎯 Key Features
+## 🌟 Key Features
 
-- **🤖 Multi-Provider AI Wrapper**: Unified interface for different AI providers
-- **🧠 Thinking Integration**: Full support for Gemini's thinking capabilities
-- **🔧 Plugin System**: Extensible plugin architecture for custom functionality
-- **💾 Database Integration**: MongoDB with comprehensive conversation and message storage
-- **📝 Conversation History**: Automatic conversation context management with message sequencing
-- **⚡ Real-time Streaming**: Server-sent events for streaming responses
-- **📁 File Processing**: Multimodal support for images, audio, video, and documents
-- **🔐 Authentication**: JWT-based authentication with email verification
-- **📊 Rate Limiting**: IP-based rate limiting with different tiers
-- **🛠️ Management Tools**: CLI tools for database management and testing
+### AI & Provider Integration
+- ✅ **Multi-Provider Architecture** with Google Gemini (extensible for Claude, GPT, etc.)
+- ✅ **Advanced Thinking Models** with Gemini 2.5 series support
+- ✅ **Flexible Model Selection** per conversation and message
+- ✅ **Automatic Conversation History** included in all AI interactions
+- ✅ **Message Editing & Regeneration** with conversation branching
+- ✅ **Enhanced Response Metadata** (tokens, timing, model info, thoughts)
 
-## 🏗️ Architecture
+### Authentication & User Management
+- ✅ **Multiple Authentication Methods**:
+  - Traditional registration with OTP verification
+  - **Google OAuth integration** with account linking
+  - **Guest login** with 5-message trial access
+  - **Secure password reset** with two-step OTP verification
+- ✅ **Role-based Access Control** (user, admin, guest)
+- ✅ **Session Management** with JWT tokens and logout functionality
 
-### Provider System
-Apsara uses a provider pattern that allows easy integration of multiple AI services:
-- **Current**: Google Gemini (2.5 Flash, 2.5 Pro, 2.5 Flash-Lite)
-- **Future**: Claude, Grok, OpenAI, and other providers
+### Rate Limiting & Usage Control
+- ✅ **Intelligent Rate Limiting System**:
+  - **Guest**: 5 total messages (gemini-2.5-flash only)
+  - **Free**: 20/day gemini-2.5-flash, 5/day gemini-2.5-pro, 30/day gemini-2.5-flash-lite
+  - **Premium**: 100/day flash, 50/day pro, 200/day lite
+  - **Enterprise**: Unlimited access
+- ✅ **Usage Tracking & Analytics** with detailed statistics
+- ✅ **Automatic Daily Reset** at midnight UTC
+- ✅ **Real-time Usage Monitoring** with remaining limits in responses
 
-### Database Schema
-- **Users**: Authentication, preferences, usage tracking
-- **Conversations**: Multi-turn conversation management with flexible model support
-- **Messages**: Individual messages with sequential numbering, metadata, thinking, and token usage
-- **Files**: File storage and analysis tracking
+### Plugin System
+- ✅ **Provider-based Plugin Architecture** (`/api/plugins/{provider}/{plugin}/send`)
+- ✅ **Synchronous & Asynchronous Execution** with `runAsync` parameter
+- ✅ **AI Integration** with `sendToModel` for intelligent analysis
+- ✅ **Built-in Plugins**: Calculator and Echo tools
+- ✅ **Database Integration** for full conversation persistence
 
-### Plugin Architecture
-- **Provider-based**: Plugins organized by AI provider (e.g., `/api/plugins/google/calculator/send`)
-- **Extensible**: Easy to add new plugins and providers
-- **AI Integration**: Optional AI model responses to plugin results
-- **Database Storage**: All plugin executions stored with message tracking
+### Management Tools
+- ✅ **Enhanced CLI** with 19 comprehensive options
+- ✅ **User-specific Analytics** with password verification for security
+- ✅ **Conversation Management** with bulk and selective deletion
+- ✅ **Message editing** from CLI interface
+- ✅ **Simplified plugin execution** with async support
+- ✅ **Database Statistics** and monitoring tools
 
-## 🚦 Quick Start
+### Data Management
+- ✅ **Conversation Persistence** with message sequencing
+- ✅ **Incremental Message IDs** for ordered history retrieval
+- ✅ **Comprehensive Metadata** storage (timing, tokens, config)
+- ✅ **Usage History Tracking** with reset logs
+- ✅ **Guest Session Management** with temporary accounts
 
-### Prerequisites
-- Node.js 18+
-- MongoDB Atlas account
-- Google Gemini API key
+## 🚀 Latest Performance & Workflow Improvements
+- ✅ **Fixed Password Reset Flow** with proper OTP verification sequence
+- ✅ **Enhanced async plugin support** with full database integration and AI responses
+- ✅ **Automatic conversation context** in all AI interactions
+- ✅ **Multiple authentication methods** with Google OAuth and guest access
+- ✅ **Comprehensive rate limiting** with subscription-based tiers
+- ✅ **Removed response endpoint** (streamlined plugin architecture)
+- ✅ **User-specific analytics** with secure access control
+- ✅ **Enhanced CLI management** with logout and advanced features
 
-### Installation
+## 📊 API Endpoints
 
-```bash
-# Clone the repository
-git clone <repository-url>
-cd apsara-backend
-
-# Install dependencies
-npm install
-
-# Copy environment variables
-cp .env.example .env
-
-# Configure your environment variables
-# Edit .env with your credentials
-```
-
-### Environment Variables
-
-```bash
-# Server Configuration
-PORT=5000
-NODE_ENV=development
-CORS_ORIGIN=http://localhost:3000
-
-# Database
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/apsara
-DB_PASSWORD=your_database_password
-
-# Google Gemini API
-GOOGLE_GEMINI_API_KEY=your_gemini_api_key
-
-# JWT Configuration
-JWT_SECRET=your_jwt_secret
-JWT_EXPIRES_IN=7d
-
-# Email Configuration (Gmail SMTP)
-EMAIL_USERNAME=your_email@gmail.com
-EMAIL_PASSWORD=your_app_password
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-
-# Rate Limiting
-RATE_LIMIT_MAX_REQUESTS=100
-RATE_LIMIT_WINDOW=15
-
-# File Upload
-MAX_FILE_SIZE=104857600
-UPLOAD_PATH=./uploads
-```
-
-### Running the Server
-
-```bash
-# Development mode
-npm run dev
-
-# Production mode
-npm start
-
-# Management CLI
-npm run manage
-```
-
-## 📚 API Documentation
-
-### Base URL
-```
-http://localhost:5000/api
-```
-
-### 🔐 Authentication
+### Authentication Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/users/register` | Register new user |
-| POST | `/users/login` | Login user |
-| POST | `/users/guest-login` | Guest login |
+| POST | `/users/register` | Register with OTP verification |
 | POST | `/users/verify-email` | Verify email with OTP |
-| GET | `/users/profile` | Get user profile |
-| PUT | `/users/profile` | Update user profile |
+| POST | `/users/login` | Traditional email/password login |
+| POST | `/users/google-auth` | Google OAuth authentication |
+| POST | `/users/guest-login` | Create guest session (5 messages) |
+| POST | `/users/forgot-password` | Request password reset OTP |
+| POST | `/users/verify-reset-otp` | Verify password reset OTP |
+| POST | `/users/reset-password` | Set new password after OTP verification |
 
-### 🤖 AI Generation
+### AI Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/ai/generate` | Generate AI content with conversation storage |
-| POST | `/ai/edit-message` | Edit user message and regenerate AI response |
+| POST | `/ai/generate` | Generate AI response (auto includes history) |
+| POST | `/ai/edit-message` | Edit message and regenerate response |
 | POST | `/ai/embeddings` | Generate text embeddings |
-| GET | `/ai/providers` | List available providers |
-| GET | `/ai/models` | List available models |
 
-#### AI Generation with Conversation History
-
-**Required Parameters**: `userId`, `conversationId`, `contents`
-
-```bash
-curl -X POST http://localhost:5000/api/ai/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userId": "user123",
-    "conversationId": "conv456", 
-    "contents": "Explain quantum computing",
-    "model": "gemini-2.5-flash",
-    "config": {
-      "temperature": 0.7,
-      "thinkingConfig": {
-        "thinkingBudget": 1024,
-        "includeThoughts": true
-      },
-      "conversationHistory": {
-        "include": true,
-        "maxMessages": 20,
-        "includeThoughts": false
-      }
-    }
-  }'
-```
-
-**Response Structure**:
-```json
-{
-  "success": true,
-  "provider": "google",
-  "model": "gemini-2.5-flash",
-  "conversationId": "conv456",
-  "userMessage": {
-    "messageId": "msg789",
-    "messageSequence": 3,
-    "content": "Explain quantum computing"
-  },
-  "modelMessage": {
-    "messageId": "msg790",
-    "messageSequence": 4,
-    "content": "Quantum computing is..."
-  },
-  "text": "Quantum computing is...",
-  "thoughts": "The user is asking about quantum computing...",
-  "conversationStats": {
-    "totalMessages": 4,
-    "totalTokens": 1250,
-    "messageSequence": 4
-  },
-  "usageMetadata": {
-    "promptTokenCount": 15,
-    "candidatesTokenCount": 45,
-    "totalTokenCount": 60
-  }
-}
-```
-
-#### Message Editing
-
-**Edit a user message and regenerate subsequent AI responses:**
-
-```bash
-curl -X POST http://localhost:5000/api/ai/edit-message \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userId": "user123",
-    "conversationId": "conv456",
-    "messageId": "msg789",
-    "newContent": "What is quantum computing and how does it work?",
-    "model": "gemini-2.5-pro",
-    "config": {
-      "temperature": 0.8,
-      "maxOutputTokens": 4096,
-      "thinkingConfig": {
-        "thinkingBudget": 2048,
-        "includeThoughts": true
-      }
-    }
-  }'
-```
-
-**Edit Message Response Structure:**
-```json
-{
-  "success": true,
-  "provider": "google",
-  "model": "gemini-2.5-pro",
-  "conversationId": "conv456",
-  "editedMessage": {
-    "messageId": "msg789",
-    "messageSequence": 3,
-    "content": "What is quantum computing and how does it work?"
-  },
-  "newResponse": {
-    "messageId": "msg800",
-    "messageSequence": 4,
-    "content": "Quantum computing is a revolutionary computing paradigm..."
-  },
-  "deletedCount": 2,
-  "text": "Quantum computing is a revolutionary computing paradigm...",
-  "thoughts": "The user is asking for a comprehensive explanation...",
-  "usageMetadata": {
-    "promptTokenCount": 25,
-    "candidatesTokenCount": 180,
-    "totalTokenCount": 205,
-    "thoughtsTokenCount": 45
-  },
-  "modelMetadata": {
-    "provider": "google",
-    "model": "gemini-2.5-pro",
-    "apiVersion": "2.5",
-    "temperature": 0.8,
-    "maxOutputTokens": 4096,
-    "systemInstruction": "You are a helpful assistant",
-    "thinkingConfig": {
-      "thinkingBudget": 2048,
-      "includeThoughts": true
-    }
-  }
-}
-```
-
-### 🔧 Plugin System
+### Plugin Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/plugins/list_plugins` | List all available plugins |
 | GET | `/plugins/:provider` | List plugins for provider |
-| POST | `/plugins/:provider/:plugin/send` | Execute plugin |
-| GET | `/plugins/:provider/:plugin/response` | Get plugin response |
-| POST | `/plugins/function-call` | Execute plugins via function calling |
+| POST | `/plugins/:provider/:plugin/send` | Execute plugin (sync/async) |
 
-#### Available Plugins
-
-**Calculator Plugin**
-```bash
-curl -X POST http://localhost:5000/api/plugins/google/calculator/send \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userId": "user123",
-    "conversationId": "conv456",
-    "parameters": {
-      "operation": "add",
-      "number1": 10,
-      "number2": 5
-    },
-    "sendToModel": true,
-    "modelConfig": {
-      "model": "gemini-2.5-flash",
-      "provider": "google",
-      "includeConversationHistory": true
-    }
-  }'
-```
-
-**Echo Plugin**
-```bash
-curl -X POST http://localhost:5000/api/plugins/google/echo/send \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userId": "user123",
-    "conversationId": "conv456",
-    "parameters": {
-      "message": "Hello, World!"
-    },
-    "sendToModel": false
-  }'
-```
-
-**Plugin Response Structure**:
-```json
-{
-  "success": true,
-  "plugin": "calculator",
-  "provider": "google",
-  "conversationId": "conv456",
-  "messageId": "msg791",
-  "messageSequence": 5,
-  "result": {
-    "success": true,
-    "result": 15,
-    "operation": "add",
-    "operands": { "number1": 10, "number2": 5 },
-    "message": "10 add 5 = 15"
-  },
-  "responseId": "resp123",
-  "sendToModel": true,
-  "aiResponse": {
-    "messageId": "msg792",
-    "messageSequence": 6,
-    "content": "The calculation shows that 10 + 5 equals 15...",
-    "thoughts": "This is a simple addition problem...",
-    "tokenUsage": { "totalTokenCount": 25 }
-  }
-}
-```
-
-### 💬 Conversations
+### Conversation Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/conversations` | Create conversation |
-| GET | `/conversations/:userId` | Get user conversations |
-| GET | `/conversations/:conversationId/messages` | Get conversation messages |
-| PUT | `/conversations/:conversationId` | Update conversation |
-| DELETE | `/conversations/:conversationId` | Delete conversation |
+| GET | `/conversations` | List user conversations |
+| GET | `/conversations/:id` | Get conversation details |
+| GET | `/conversations/:id/messages` | Get conversation messages |
+| PUT | `/conversations/:id` | Update conversation |
+| DELETE | `/conversations/:id` | Delete conversation |
 
-### 📁 File Management
+## 📖 Usage Examples
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/files/upload` | Upload files to AI provider |
-| GET | `/files` | List uploaded files |
-| POST | `/files/:fileId/analyze` | Analyze uploaded file |
-| POST | `/files/analyze-local` | Analyze local file |
-| GET | `/files/supported-types` | Get supported file types |
+### Quick Start with Guest Access
 
-## 🧠 Thinking Integration
+```bash
+# 1. Start guest session (no registration required)
+curl -X POST http://localhost:5000/api/users/guest-login \
+  -H "Content-Type: application/json" \
+  -d '{}'
 
-Apsara fully supports Google Gemini's thinking capabilities:
+# 2. Create conversation
+curl -X POST http://localhost:5000/api/conversations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "guest_user_id",
+    "title": "Quick Test",
+    "systemInstruction": "You are a helpful assistant."
+  }'
 
-### Thinking Configuration
-
-```javascript
-{
-  thinkingConfig: {
-    thinkingBudget: -1, // -1 = Dynamic, 0 = Off, positive = token count
-    includeThoughts: true // Include thought summaries in response
-  }
-}
+# 3. Send message (auto-includes history, rate limited to 5 total)
+curl -X POST http://localhost:5000/api/ai/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "guest_user_id",
+    "conversationId": "guest_conv_123",
+    "content": "Hello! Explain AI in simple terms.",
+    "model": "gemini-2.5-flash"
+  }'
 ```
 
-### Model-Specific Budgets
+### Traditional Registration Flow
 
-- **Gemini 2.5 Pro**: 128-32768 tokens (cannot disable)
-- **Gemini 2.5 Flash**: 0-24576 tokens (can disable)
-- **Gemini 2.5 Flash-Lite**: 512-24576 tokens or 0
+```bash
+# 1. Register user
+curl -X POST http://localhost:5000/api/users/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fullName": "John Doe",
+    "email": "john@example.com", 
+    "password": "securepass123",
+    "acceptTerms": true
+  }'
 
-### Response Structure
+# 2. Verify email with OTP
+curl -X POST http://localhost:5000/api/users/verify-email \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "john@example.com",
+    "otp": "123456"
+  }'
 
-```javascript
-{
-  success: true,
-  provider: "google",
-  model: "gemini-2.5-flash",
-  text: "AI response text",
-  thoughts: "Thought summary", // When includeThoughts: true
-  hasThoughtSignatures: true/false,
-  usageMetadata: {
-    promptTokenCount: 10,
-    candidatesTokenCount: 50,
-    totalTokenCount: 60,
-    thoughtsTokenCount: 20
-  }
-}
+# 3. Login
+curl -X POST http://localhost:5000/api/users/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "john@example.com",
+    "password": "securepass123"
+  }'
 ```
 
-## 🛠️ Management CLI
+### Google OAuth Authentication
 
-The management CLI provides easy database interaction:
+```bash
+curl -X POST http://localhost:5000/api/users/google-auth \
+  -H "Content-Type: application/json" \
+  -d '{
+    "idToken": "google_id_token_here",
+    "email": "user@gmail.com",
+    "name": "Google User"
+  }'
+```
+
+### AI Generation with Thinking
+
+```bash
+curl -X POST http://localhost:5000/api/ai/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user_123",
+    "conversationId": "conv_456", 
+    "content": "Explain quantum computing",
+    "model": "gemini-2.5-pro",
+    "config": {
+      "temperature": 0.7,
+      "maxOutputTokens": 2048,
+      "thinkingConfig": {
+        "includeThoughts": true,
+        "thinkingBudget": 2000
+      }
+    }
+  }'
+```
+
+### Plugin Usage (Calculator)
+
+```bash
+# Synchronous execution with AI analysis
+curl -X POST http://localhost:5000/api/plugins/google/calculator/send \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user_123",
+    "conversationId": "conv_456",
+    "parameters": {
+      "number1": 15,
+      "number2": 7,
+      "operation": "multiply"
+    },
+    "sendToModel": true,
+    "runAsync": false
+  }'
+
+# Asynchronous execution
+curl -X POST http://localhost:5000/api/plugins/google/calculator/send \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user_123", 
+    "conversationId": "conv_456",
+    "parameters": {
+      "number1": 100,
+      "number2": 25,
+      "operation": "divide"
+    },
+    "sendToModel": true,
+    "runAsync": true
+  }'
+```
+
+### Message Editing
+
+```bash
+curl -X POST http://localhost:5000/api/ai/edit-message \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user_123",
+    "conversationId": "conv_456", 
+    "messageId": "msg_789",
+    "newContent": "Explain machine learning instead",
+    "model": "gemini-2.5-flash",
+    "config": {
+      "temperature": 0.8,
+      "maxOutputTokens": 1024,
+      "thinkingConfig": {
+        "includeThoughts": true,
+        "thinkingBudget": 1000
+      }
+    }
+  }'
+```
+
+## 📚 Comprehensive Documentation
+
+Explore detailed usage examples and guides:
+
+- **[Basic Usage](examples/01-basic-usage.md)** - Get started with core functionality
+- **[Plugin Usage](examples/02-plugin-usage.md)** - Master the plugin system  
+- **[Rate Limiting](examples/03-rate-limiting.md)** - Understand usage limits and plans
+- **[Authentication](examples/04-authentication.md)** - All authentication methods
+- **[CLI Usage](examples/05-cli-usage.md)** - Management tool guide
+
+## 🔧 Management CLI (19 Options)
+
+Start the interactive management tool:
 
 ```bash
 npm run manage
 ```
 
-### CLI Features
+### CLI Features:
 
-1. **Create Conversation** - Create new conversations (no model required, system message only asked once)
-2. **List Conversations** - View all conversations with selection interface
-3. **Choose Conversation** - Select conversation from list (no manual ID entry)
-4. **View Messages** - Display conversation messages with sequencing
-5. **Send Message to AI** - Advanced message sending with full configuration options
-6. **Edit Message** - Edit user messages and regenerate AI responses
-7. **Call Plugin** - Execute plugins with comprehensive AI integration
-8. **Create User** - Add new users
-9. **List Users** - View all users
-10. **Choose User** - Select user from list (no manual ID entry)
-11. **Delete User** - Delete specific user with confirmation
-12. **Delete All Users** - Delete all users with double confirmation
-13. **Database Statistics** - View comprehensive usage statistics
-14. **Exit** - Close the CLI
+1. **Create a new conversation** - Set up conversations with custom system instructions
+2. **List all conversations** - View conversations across all users
+3. **Choose a conversation** - Select active conversation for operations
+4. **Send message to AI** - Test AI generation with full configuration
+5. **List messages in conversation** - View conversation history
+6. **Edit a message** - Modify previous messages and regenerate responses
+7. **Call a plugin** - Test plugin functionality (sync/async)
+8. **Create a user** - Add users to the database
+9. **List all users** - View all registered users
+10. **Choose/switch user** - Select active user for operations
+11. **View schema and database info** - Database structure overview
+12. **Delete user by email/ID** - Remove specific users
+13. **Delete all conversations** - Clear all conversation data
+14. **Delete specific conversation** - Remove individual conversations
+15. **Full user registration** - Complete registration system with OTP verification
+    - Register new user (with OTP)
+    - Login existing user
+    - **Login with Google OAuth**
+    - **Guest login (5 messages limit)**
+    - Forgot password (OTP reset)
+16. **Logout current user** - Clear current session
+17. **Database statistics** - Comprehensive usage analytics
+18. **User-specific statistics** - Personal analytics (password protected)
+19. **Exit** - Close the CLI
 
 ### Enhanced CLI Features
 
-**Startup User Selection**:
-- Automatic user list on startup
-- Shows recent conversations for selected user
-- Skip option for no user selection
-- Graceful handling when no users exist
+**Complete Registration System**:
+- **Full OTP-based registration** with email verification
+- **User login** with automatic profile loading and duplicate login prevention
+- **Google OAuth integration** with account creation and linking
+- **Guest login** with session management and usage tracking
+- **Password reset** with proper OTP verification flow (verify first, then set password)
+- **User logout** functionality with session management
 
-**Advanced Message Configuration**:
-- Model selection (gemini-2.5-flash, gemini-2.5-pro, gemini-2.5-flash-lite)
-- Temperature control (0.0-2.0)
-- Max output tokens configuration
-- Conversation history settings (include/exclude, max messages)
-- Advanced thinking configuration:
-  - Dynamic thinking (-1)
-  - Disabled thinking (0)
-  - Custom token budget (1-32768)
-  - Include/exclude thoughts in response
-
-**Message Editing**:
-- Select from list of user messages
-- Edit message content
-- Automatic deletion of subsequent messages
-- Full AI configuration for regenerated response
-- Complete metadata display
-
-**Enhanced Plugin Execution**:
-- Calculator and Echo plugins
-- Advanced AI model configuration
-- Provider selection (google, future: claude, grok)
-- Temperature and token control
-- Thinking configuration
-- Conversation history integration
-- Comprehensive response metadata
+**Advanced User Management**:
+- **User-specific statistics** with password verification for security
+- **Personal analytics** including conversation history, token usage, model preferences
+- **Most active conversations** and message distribution analysis
+- **Secure access** requiring current user authentication
 
 **System Message Persistence**:
-- System messages set once per conversation
-- Consistent throughout conversation lifetime
-- No re-prompting for existing conversations
-- New conversations require system message setup
+- System messages are persistent per conversation
+- Cannot be changed mid-conversation (maintain consistency)
+- New conversations can have different system instructions
 
-## 🔗 Provider API Differences & Use Cases
+**Enhanced Plugin System**:
+- **Asynchronous plugin execution** with background processing
+- **AI integration** for plugin result analysis
+- **Database persistence** for all plugin interactions
+- **Simplified configuration** with smart defaults
 
-### AI Generation (`/api/ai/generate`)
-**Purpose**: Direct AI text generation with conversation management
-**Use Cases**:
-- Chat applications
-- Content generation
-- Q&A systems
-- Educational assistants
+## 🎯 Rate Limiting System
 
-**Key Features**:
-- Conversation history integration
-- Thinking capabilities
-- Token usage tracking
-- Database persistence
+### Subscription Tiers
 
-### Plugin System (`/api/plugins/*`)
-**Purpose**: Structured function/tool calling with optional AI integration
-**Use Cases**:
-- Calculators and utilities
-- External API integrations
-- Data processing tools
-- Custom business logic
+| Plan | gemini-2.5-flash | gemini-2.5-pro | gemini-2.5-flash-lite | Features |
+|------|------------------|------------------|------------------------|----------|
+| **Guest** | 5 total messages | ❌ No access | ❌ No access | 24h session, trial access |
+| **Free** | 20/day | 5/day | 30/day | Full features, daily reset |
+| **Premium** | 100/day | 50/day | 200/day | Priority support, analytics |
+| **Enterprise** | ♾️ Unlimited | ♾️ Unlimited | ♾️ Unlimited | Custom SLA, dedicated support |
 
-**Key Features**:
-- Provider-specific organization
-- Optional AI model responses
-- Function calling pattern
-- Extensible architecture
+### Rate Limit Response Example
 
-### Provider Management
-**Current Implementation**: Google Gemini
-**Future Providers**: Claude, Grok, OpenAI
-
-**Provider Benefits**:
-- **Unified Interface**: Same API across providers
-- **Provider-Specific Features**: Leverage unique capabilities
-- **Fallback Support**: Switch providers for reliability
-- **Cost Optimization**: Use different providers for different tasks
-
-## 📊 Rate Limiting
-
-Different endpoints have different rate limits:
-
-- **General API**: 100 requests/15 minutes
-- **AI Endpoints**: 50 requests/15 minutes
-- **Plugin Execution**: 30 executions/15 minutes
-- **File Uploads**: 20 uploads/hour
-- **Live API**: 10 connections/hour
-- **Authentication**: 10 attempts/15 minutes
-
-## 🔗 Testing Endpoints
-
-### Health Check
-```bash
-curl http://localhost:5000/health
-```
-
-### User Registration
-```bash
-curl -X POST http://localhost:5000/api/users/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "fullName": "Test User",
-    "email": "test@example.com",
-    "password": "password123",
-    "acceptTerms": true
-  }'
-```
-
-### Create Conversation
-```bash
-curl -X POST http://localhost:5000/api/conversations \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userId": "user_id_here",
-    "title": "Test Conversation",
-    "type": "rest",
-    "config": {
-      "rest": {
-        "systemInstruction": "You are a helpful assistant",
-        "temperature": 0.7
-      }
-    }
-  }'
-```
-
-### AI Generation with Conversation
-```bash
-curl -X POST http://localhost:5000/api/ai/generate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userId": "user_id_here",
-    "conversationId": "conv_id_here",
-    "contents": "What is machine learning?",
-    "model": "gemini-2.5-flash",
-    "config": {
-      "temperature": 0.7,
-      "thinkingConfig": {
-        "thinkingBudget": -1,
-        "includeThoughts": true
-      },
-      "conversationHistory": {
-        "include": true,
-        "maxMessages": 20
-      }
-    }
-  }'
-```
-
-### Plugin Execution
-```bash
-# List all plugins
-curl http://localhost:5000/api/plugins/list_plugins
-
-# Execute calculator plugin with AI analysis
-curl -X POST http://localhost:5000/api/plugins/google/calculator/send \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userId": "user_id_here",
-    "conversationId": "conv_id_here",
-    "parameters": {
-      "operation": "multiply",
-      "number1": 7,
-      "number2": 8
+```json
+{
+  "success": false,
+  "error": "Rate limit exceeded",
+  "details": "Daily limit exceeded for gemini-2.5-flash. Used 20/20 messages today.",
+  "usageInfo": {
+    "subscriptionPlan": "free",
+    "dailyUsage": {
+      "date": "2024-01-15",
+      "gemini-2.5-flash": { "count": 20, "limit": 20 },
+      "gemini-2.5-pro": { "count": 3, "limit": 5 }
     },
-    "sendToModel": true,
-    "modelConfig": {
-      "model": "gemini-2.5-flash",
-      "provider": "google",
-      "includeConversationHistory": true,
-      "maxHistoryMessages": 10
+    "totalUsage": {
+      "totalMessages": 245,
+      "totalTokens": 67890
     }
-  }'
+  }
+}
 ```
 
-### Function Calling
+## 🔐 Security & Authentication
+
+### JWT Token Management
+- Secure token-based authentication
+- Configurable expiration times
+- Role-based access control
+- Guest session management
+
+### Password Security
+- Minimum 6 characters required
+- Bcrypt hashing with salt
+- Account lockout after failed attempts
+- Secure password reset with OTP
+
+### Google OAuth Integration
+- Secure ID token verification
+- Account linking capabilities
+- Profile picture integration
+- Email pre-verification
+
+## 🗂️ Database Schema
+
+### Users Collection
+```javascript
+{
+  fullName: String,
+  email: String (unique),
+  password: String (hashed),
+  role: String (user/admin/guest),
+  subscriptionPlan: String (guest/free/premium/enterprise),
+  authProvider: String (local/google),
+  googleId: String,
+  isGuest: Boolean,
+  guestSessionId: String,
+  isEmailVerified: Boolean,
+  // ... additional fields
+}
+```
+
+### UserUsage Collection (New)
+```javascript
+{
+  userId: ObjectId,
+  subscriptionPlan: String,
+  dailyUsage: {
+    date: Date,
+    'gemini-2.5-flash': { count: Number, limit: Number },
+    'gemini-2.5-pro': { count: Number, limit: Number },
+    'gemini-2.5-flash-lite': { count: Number, limit: Number }
+  },
+  guestLimits: {
+    totalMessagesLimit: Number,
+    totalMessagesUsed: Number
+  },
+  totalUsage: {
+    totalMessages: Number,
+    totalTokens: Number,
+    totalConversations: Number
+  },
+  // ... additional tracking fields
+}
+```
+
+### Conversations Collection
+```javascript
+{
+  conversationId: String (unique),
+  userId: String,
+  title: String,
+  config: {
+    rest: {
+      systemInstruction: String,
+      // Removed model field for flexibility
+    }
+  },
+  stats: {
+    messageSequence: Number, // Auto-incremented per conversation
+    totalMessages: Number,
+    totalTokens: Number
+  },
+  // ... additional fields
+}
+```
+
+### Messages Collection  
+```javascript
+{
+  messageId: String (unique),
+  conversationId: String,
+  userId: String,
+  messageSequence: Number, // Ordered within conversation
+  role: String (user/model/plugin),
+  content: {
+    text: String,
+    thoughts: String // For AI thinking responses
+  },
+  config: Object,
+  metadata: {
+    timing: Object,
+    tokens: Object,
+    provider: Object
+  },
+  isEdited: Boolean,
+  editHistory: Array,
+  // ... additional fields
+}
+```
+
+## 🚀 Installation & Setup
+
+### Prerequisites
+- Node.js 18+ 
+- MongoDB 5.0+
+- Email service credentials (for OTP)
+- Google OAuth credentials (optional)
+
+### Quick Start
+
 ```bash
-curl -X POST http://localhost:5000/api/plugins/function-call \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userId": "user_id_here",
-    "conversationId": "conv_id_here",
-    "provider": "google",
-    "functions": [
-      {
-        "name": "calculator",
-        "parameters": {
-          "operation": "add",
-          "number1": 15,
-          "number2": 25
-        }
-      },
-      {
-        "name": "echo",
-        "parameters": {
-          "message": "Function calling test"
-        }
-      }
-    ],
-    "modelConfig": {
-      "model": "gemini-2.5-flash",
-      "temperature": 0.7,
-      "includeConversationHistory": true,
-      "thinkingConfig": {
-        "thinkingBudget": -1,
-        "includeThoughts": true
-      }
-    }
-  }'
+# Clone repository
+git clone https://github.com/your-org/apsara-backend.git
+cd apsara-backend
+
+# Install dependencies
+npm install
+
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your configuration
+
+# Start development server
+npm run dev
+
+# Run management CLI
+npm run manage
 ```
 
-### Message Editing
+### Environment Variables
+
+```env
+# Server Configuration
+PORT=5000
+NODE_ENV=development
+
+# Database
+MONGODB_URI=mongodb://localhost:27017/apsara
+
+# JWT Configuration  
+JWT_SECRET=your-secret-key
+JWT_EXPIRES_IN=7d
+
+# Google Gemini API
+GOOGLE_AI_API_KEY=your-gemini-api-key
+
+# Email Service (for OTP)
+EMAIL_SERVICE_API_KEY=your-email-api-key
+EMAIL_FROM=noreply@yourapp.com
+
+# Google OAuth (optional)
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+
+# Rate Limiting
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
+```
+
+## 🔧 Development
+
+### Available Scripts
 ```bash
-curl -X POST http://localhost:5000/api/ai/edit-message \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userId": "user_id_here",
-    "conversationId": "conv_id_here",
-    "messageId": "message_id_to_edit",
-    "newContent": "This is the edited message content",
-    "model": "gemini-2.5-flash",
-    "config": {
-      "temperature": 0.7,
-      "maxOutputTokens": 2048,
-      "thinkingConfig": {
-        "thinkingBudget": -1,
-        "includeThoughts": true
-      }
-    }
-  }'
+npm run dev          # Start development server with hot reload
+npm run start        # Start production server
+npm run manage       # Launch management CLI
+npm test             # Run test suite
+npm run test:plugins # Test plugin functionality
+npm run lint         # Run ESLint
+npm run format       # Format code with Prettier
 ```
 
-## 🏢 Project Structure
+### Testing
 
-```
-apsara-backend/
-├── src/
-│   ├── config/
-│   │   └── database.js          # Database configuration
-│   ├── middleware/
-│   │   ├── errorHandler.js      # Error handling middleware
-│   │   └── rateLimiter.js       # Rate limiting middleware
-│   ├── models/
-│   │   ├── User.js              # User model
-│   │   ├── Conversation.js      # Conversation model (no fixed model)
-│   │   ├── Message.js           # Message model with sequencing
-│   │   └── File.js              # File model
-│   ├── providers/
-│   │   ├── base/
-│   │   │   └── BaseProvider.js  # Abstract base provider
-│   │   ├── google/
-│   │   │   └── GoogleProvider.js # Google Gemini implementation
-│   │   └── ProviderManager.js   # Provider management
-│   ├── routes/
-│   │   ├── ai.js                # AI generation with conversation history
-│   │   ├── tools.js             # Plugin system with conversation support
-│   │   ├── users.js             # User management
-│   │   ├── conversations.js     # Conversation management
-│   │   ├── files.js             # File management
-│   │   ├── sessions.js          # Session management
-│   │   └── google-auth.js       # Google authentication
-│   ├── services/
-│   │   ├── emailService.js      # Email service
-│   │   ├── database/
-│   │   │   └── ConversationService.js
-│   │   └── websocket/
-│   │       ├── liveApiServer.js # WebSocket Live API
-│   │       └── SessionManager.js
-│   └── server.js                # Main server file
-├── scripts/
-│   └── manage-conversations.js  # Enhanced CLI management tool
-├── uploads/                     # File upload directory
-├── package.json
-├── .env.example
-└── README.md
+```bash
+# Test basic functionality
+npm test
+
+# Test specific features
+npm run test:auth
+npm run test:rate-limiting
+npm run test:plugins
+
+# Integration testing via CLI
+npm run manage
 ```
 
-## 🔮 Future Enhancements
+## 📈 Monitoring & Analytics
 
-- **Multi-Provider Support**: Claude, Grok, OpenAI integration
-- **Advanced Plugins**: Code execution, web search, custom integrations
-- **Live API**: Real-time audio/video processing
-- **Plugin Marketplace**: Community-driven plugin ecosystem
-- **Conversation Templates**: Pre-configured conversation types
-- **Caching**: Redis integration for improved performance
-- **Analytics**: Advanced usage analytics and monitoring
-- **Docker**: Containerization for easy deployment
+### Database Statistics
+- User registration trends
+- Subscription plan distribution
+- Token usage patterns
+- Model popularity metrics
+- Error rate monitoring
 
-## 📝 Key Changes Made
+### User Analytics
+- Daily/monthly active users
+- Conversation engagement
+- Message volume trends
+- Feature usage statistics
+- Rate limit hit rates
 
-### Database Schema Updates
-- ✅ **Removed model requirement** from conversations (flexible model per message)
-- ✅ **Added messageSequence** for incremental message numbering
-- ✅ **Enhanced conversation history** support
-- ✅ **Message editing history** tracking
+### Performance Metrics
+- API response times
+- Database query performance
+- Plugin execution times
+- Authentication success rates
+- Error frequency analysis
 
-### API Enhancements
-- ✅ **Required userId and conversationId** for all AI and plugin requests
-- ✅ **Conversation history integration** with configurable options
-- ✅ **Plugin system redesign** with provider organization
-- ✅ **AI integration for plugins** with optional model responses
-- ✅ **Message editing endpoint** with conversation branching
-- ✅ **Enhanced response metadata** with comprehensive model information
-- ✅ **Advanced configuration options** (temperature, tokens, thinking)
+## 🔄 API Response Patterns
 
-### User Experience Improvements
-- ✅ **Selection-based UI** instead of manual ID entry
-- ✅ **Startup user selection** with conversation preview
-- ✅ **Enhanced configuration options** for all AI interactions
-- ✅ **System message persistence** per conversation
-- ✅ **User management** with deletion capabilities
+### Success Response
+```json
+{
+  "success": true,
+  "message": "Operation completed successfully",
+  "data": { /* response data */ },
+  "metadata": { /* additional info */ }
+}
+```
 
-### Management Tools
-- ✅ **Enhanced CLI** with 14 comprehensive options
-- ✅ **Message editing** from CLI interface
-- ✅ **Advanced plugin configuration** with thinking support
-- ✅ **Real-time testing** capabilities
-- ✅ **Database inspection** and statistics
-- ✅ **User management** with safety confirmations
+### Error Response  
+```json
+{
+  "success": false,
+  "error": "Error type",
+  "details": "Detailed error message",
+  "code": "ERROR_CODE",
+  "suggestions": ["Helpful suggestions"]
+}
+```
 
-### Provider Architecture
-- ✅ **Provider-agnostic design** for easy multi-provider support
-- ✅ **Unified response format** across providers
-- ✅ **Extensible plugin system** per provider
-- ✅ **Enhanced metadata** in all responses
-- ✅ **Thinking integration** across all endpoints
+### Rate Limited Response
+```json
+{
+  "success": false,
+  "error": "Rate limit exceeded", 
+  "details": "Specific limit details",
+  "usageInfo": { /* current usage stats */ },
+  "resetTime": "2024-01-16T00:00:00Z"
+}
+```
+
+## 🛠️ Architecture
+
+### Core Components
+- **Authentication Service** - Multi-provider auth with JWT
+- **Rate Limiting Engine** - Subscription-based usage control
+- **Provider Manager** - AI service abstraction layer
+- **Plugin System** - Extensible tool integration
+- **Conversation Engine** - Message flow and history management
+- **Usage Tracker** - Real-time usage monitoring and analytics
+
+### Design Patterns
+- **Provider Pattern** - Standardized AI service integration
+- **Plugin Architecture** - Extensible tool system
+- **Repository Pattern** - Data access abstraction
+- **Service Layer** - Business logic separation
+- **Middleware Pipeline** - Request processing chain
+
+## 🚀 Production Deployment
+
+### Recommended Setup
+- **Application**: PM2 process manager
+- **Database**: MongoDB Atlas or self-hosted replica set
+- **Reverse Proxy**: Nginx with SSL termination
+- **Monitoring**: Application and infrastructure monitoring
+- **Email**: Production-grade email service
+- **Backup**: Automated database backups
+
+### Security Checklist
+- [ ] Environment variables secured
+- [ ] Database connection encrypted
+- [ ] API rate limiting configured
+- [ ] CORS properly configured
+- [ ] JWT secret rotated regularly
+- [ ] Email OTP expiration set
+- [ ] Google OAuth properly configured
+- [ ] Request logging enabled
+- [ ] Error tracking implemented
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Update documentation
+6. Submit a pull request
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## 🆘 Support
 
-- Google Gemini API for advanced AI capabilities
-- MongoDB for robust database solutions
-- Express.js for the web framework
-- All contributors and the open-source community
+- **Documentation**: [Full API Documentation](docs/)
+- **Issues**: [GitHub Issues](https://github.com/your-org/apsara-backend/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/your-org/apsara-backend/discussions)
+- **Email**: support@yourapp.com
 
 ---
 
-**Built with ❤️ by the Apsara Team** 
+**Apsara AI Backend** - A comprehensive, production-ready AI conversation platform with enterprise-grade features, flexible authentication, intelligent rate limiting, and powerful plugin system. Built for scale, security, and developer experience. 
