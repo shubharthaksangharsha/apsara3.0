@@ -1,0 +1,458 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Apsara AI{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row">
+        <!-- Sidebar -->
+        <div class="col-lg-3 col-md-4">
+            <div class="sidebar">
+                <!-- User Info Card -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="avatar bg-primary text-white rounded-circle d-flex align-items-center justify-content-center me-3" 
+                                 style="width: 50px; height: 50px; font-size: 1.5rem;">
+                                {{ user.fullName[0].upper() }}
+                            </div>
+                            <div>
+                                <h6 class="mb-0">{{ user.fullName }}</h6>
+                                <small class="text-muted">{{ user.email }}</small>
+                                <div class="mt-1">
+                                    <span class="badge bg-{{ 'warning' if user.role == 'guest' else 'primary' }}">
+                                        {{ user.role.title() }}
+                                        {% if user.subscriptionPlan %}
+                                            - {{ user.subscriptionPlan.title() }}
+                                        {% endif %}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        {% if user.role == 'guest' and guest_limitations %}
+                        <div class="mt-3 p-2 bg-light rounded">
+                            <small class="text-muted">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Trial: {{ guest_limitations.remainingMessages }}/{{ guest_limitations.totalMessagesLimit }} messages left
+                            </small>
+                            <div class="progress mt-1" style="height: 4px;">
+                                <div class="progress-bar bg-warning" data-progress="{{ guest_limitations.totalMessagesUsed }}" data-total="{{ guest_limitations.totalMessagesLimit }}"></div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- New Conversation Button -->
+                <button class="btn btn-primary w-100 mb-4" data-bs-toggle="modal" data-bs-target="#newConversationModal">
+                    <i class="bi bi-plus-circle me-2"></i>New Conversation
+                </button>
+                
+                <!-- Conversations List -->
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">
+                            <i class="bi bi-chat-dots me-2"></i>Your Conversations
+                        </h6>
+                    </div>
+                    <div class="card-body p-0">
+                        {% if conversations %}
+                            <div class="conversation-list">
+                                {% for conversation in conversations %}
+                                <a href="{{ url_for('conversation_view', conversation_id=conversation.conversationId) }}" 
+                                   class="conversation-item d-block text-decoration-none">
+                                    <div class="d-flex align-items-start p-3 border-bottom">
+                                        <div class="conversation-icon bg-light rounded-circle d-flex align-items-center justify-content-center me-3" 
+                                             style="width: 40px; height: 40px; min-width: 40px;">
+                                            <i class="bi bi-chat text-primary"></i>
+                                        </div>
+                                        <div class="conversation-content flex-grow-1 min-width-0">
+                                            <h6 class="conversation-title mb-1 text-truncate">{{ conversation.title }}</h6>
+                                            <p class="conversation-preview text-muted small mb-1">
+                                                {% if conversation.stats and conversation.stats.totalMessages %}
+                                                    {{ conversation.stats.totalMessages }} message{{ 's' if conversation.stats.totalMessages != 1 else '' }}
+                                                {% else %}
+                                                    No messages yet
+                                                {% endif %}
+                                            </p>
+                                            <small class="text-muted">
+                                                {% if conversation.updatedAt %}
+                                                    {% if conversation.updatedAt is string %}
+                                                        {{ conversation.updatedAt[:10] }}
+                                                    {% else %}
+                                                        {{ conversation.updatedAt.strftime('%b %d, %Y') }}
+                                                    {% endif %}
+                                                {% else %}
+                                                    Recently
+                                                {% endif %}
+                                            </small>
+                                        </div>
+                                        <div class="conversation-status">
+                                            <span class="badge bg-{{ 'success' if conversation.status == 'active' else 'secondary' }} small">
+                                                {{ conversation.status }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </a>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <div class="text-center py-5">
+                                <i class="bi bi-chat-dots text-muted" style="font-size: 3rem;"></i>
+                                <h6 class="mt-3 text-muted">No conversations yet</h6>
+                                <p class="text-muted small">Create your first conversation to get started</p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="col-lg-9 col-md-8">
+            <div class="main-content">
+                <!-- Welcome Section -->
+                <div class="welcome-section mb-4">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <h2 class="mb-2">
+                                Welcome back, {{ user.fullName.split()[0] }}! 
+                                <i class="bi bi-waving-hand text-warning"></i>
+                            </h2>
+                            <p class="text-muted mb-0">
+                                {% if user.role == 'guest' %}
+                                    You're in trial mode. Create conversations and chat with AI using our free trial.
+                                {% else %}
+                                    Start a new conversation or continue where you left off.
+                                {% endif %}
+                            </p>
+                        </div>
+                        <div class="col-md-4 text-md-end">
+                            <button class="btn btn-outline-primary me-2" data-bs-toggle="modal" data-bs-target="#newConversationModal">
+                                <i class="bi bi-plus-circle me-2"></i>Start Chatting
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="testBackendConnection()">
+                                <i class="bi bi-gear me-1"></i>Debug
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Feature Cards -->
+                <div class="row mb-4">
+                    <div class="col-md-4">
+                        <div class="feature-card card h-100">
+                            <div class="card-body text-center">
+                                <div class="feature-icon bg-primary text-white rounded-circle mx-auto mb-3 d-flex align-items-center justify-content-center" 
+                                     style="width: 60px; height: 60px;">
+                                    <i class="bi bi-chat-dots" style="font-size: 1.5rem;"></i>
+                                </div>
+                                <h5 class="card-title">Smart Conversations</h5>
+                                <p class="card-text text-muted">
+                                    Engage in intelligent conversations with AI that remembers context and history.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="feature-card card h-100">
+                            <div class="card-body text-center">
+                                <div class="feature-icon bg-success text-white rounded-circle mx-auto mb-3 d-flex align-items-center justify-content-center" 
+                                     style="width: 60px; height: 60px;">
+                                    <i class="bi bi-file-earmark-image" style="font-size: 1.5rem;"></i>
+                                </div>
+                                <h5 class="card-title">File Analysis</h5>
+                                <p class="card-text text-muted">
+                                    Upload images, documents, audio, and video for AI analysis and insights.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="feature-card card h-100">
+                            <div class="card-body text-center">
+                                <div class="feature-icon bg-warning text-white rounded-circle mx-auto mb-3 d-flex align-items-center justify-content-center" 
+                                     style="width: 60px; height: 60px;">
+                                    <i class="bi bi-brain" style="font-size: 1.5rem;"></i>
+                                </div>
+                                <h5 class="card-title">AI Thinking</h5>
+                                <p class="card-text text-muted">
+                                    Get insights into AI reasoning with our advanced thinking mode feature.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Recent Activity or Getting Started -->
+                {% if conversations %}
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="bi bi-clock-history me-2"></i>Recent Activity
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            {% for conversation in conversations[:3] %}
+                            <div class="col-md-4 mb-3">
+                                <div class="activity-item">
+                                    <div class="d-flex align-items-center mb-2">
+                                        <div class="activity-icon bg-light rounded-circle d-flex align-items-center justify-content-center me-2" 
+                                             style="width: 30px; height: 30px;">
+                                            <i class="bi bi-chat text-primary small"></i>
+                                        </div>
+                                        <div>
+                                            <h6 class="mb-0 small">{{ conversation.title }}</h6>
+                                            <small class="text-muted">
+                                                {% if conversation.updatedAt %}
+                                                    {% if conversation.updatedAt is string %}
+                                                        {{ conversation.updatedAt[:5] }}
+                                                    {% else %}
+                                                        {{ conversation.updatedAt.strftime('%b %d') }}
+                                                    {% endif %}
+                                                {% else %}
+                                                    Recent
+                                                {% endif %}
+                                            </small>
+                                        </div>
+                                    </div>
+                                    <a href="{{ url_for('conversation_view', conversation_id=conversation.conversationId) }}" 
+                                       class="btn btn-sm btn-outline-primary">
+                                        Continue <i class="bi bi-arrow-right"></i>
+                                    </a>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="getting-started-card card border-primary">
+                    <div class="card-body text-center py-5">
+                        <i class="bi bi-rocket text-primary mb-3" style="font-size: 3rem;"></i>
+                        <h4 class="text-primary mb-3">Let's Get Started!</h4>
+                        <p class="text-muted mb-4">
+                            Create your first conversation and start exploring the power of AI. 
+                            You can chat about anything, analyze files, and get intelligent responses.
+                        </p>
+                        <button class="btn btn-primary btn-lg" data-bs-toggle="modal" data-bs-target="#newConversationModal">
+                            <i class="bi bi-plus-circle me-2"></i>Create First Conversation
+                        </button>
+                        
+                        <div class="mt-4">
+                            <small class="text-muted">
+                                <i class="bi bi-lightbulb me-1"></i>
+                                Try asking about anything: "Explain quantum physics", "Analyze this image", or "Help me write an email"
+                            </small>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- New Conversation Modal -->
+<div class="modal fade" id="newConversationModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-plus-circle me-2"></i>Create New Conversation
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="new-conversation-form">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="conversationTitle" class="form-label">Conversation Title</label>
+                        <input type="text" class="form-control" id="conversationTitle" 
+                               placeholder="e.g., Research Project, Creative Writing, Image Analysis" required>
+                        <div class="form-text">Give your conversation a descriptive name</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="systemInstruction" class="form-label">System Instruction (Optional)</label>
+                        <textarea class="form-control" id="systemInstruction" rows="4" 
+                                  placeholder="e.g., You are a helpful assistant specialized in creative writing. Please provide detailed, imaginative responses..."></textarea>
+                        <div class="form-text">
+                            Define how the AI should behave in this conversation. This sets the context for all interactions.
+                        </div>
+                    </div>
+                    
+                    <div class="system-instruction-examples">
+                        <label class="form-label small text-muted">Quick Examples:</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary example-btn" 
+                                    data-instruction="You are a helpful coding assistant. Provide clear, well-commented code examples and explanations.">
+                                <i class="bi bi-code-slash me-1"></i>Coding Assistant
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary example-btn" 
+                                    data-instruction="You are a creative writing partner. Help with storytelling, character development, and plot ideas.">
+                                <i class="bi bi-pen me-1"></i>Creative Writing
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary example-btn" 
+                                    data-instruction="You are an educational tutor. Explain concepts clearly with examples and encourage learning.">
+                                <i class="bi bi-book me-1"></i>Learning Tutor
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary example-btn" 
+                                    data-instruction="You are a professional analyst. Provide detailed analysis of documents, images, and data.">
+                                <i class="bi bi-graph-up me-1"></i>Data Analyst
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        Cancel
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-plus-circle me-2"></i>Create Conversation
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Set progress bar width for guest limitations
+    const progressBar = document.querySelector('.progress-bar[data-progress]');
+    if (progressBar) {
+        const used = parseInt(progressBar.dataset.progress) || 0;
+        const total = parseInt(progressBar.dataset.total) || 1;
+        const percentage = Math.min((used / total) * 100, 100);
+        progressBar.style.width = percentage + '%';
+    }
+    const newConversationForm = document.getElementById('new-conversation-form');
+    const systemInstructionTextarea = document.getElementById('systemInstruction');
+    
+    // Handle system instruction examples
+    document.querySelectorAll('.example-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const instruction = this.dataset.instruction;
+            systemInstructionTextarea.value = instruction;
+            systemInstructionTextarea.focus();
+        });
+    });
+    
+    // Handle form submission
+    newConversationForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const submitBtn = this.querySelector('button[type="submit"]');
+        const originalText = submitBtn.innerHTML;
+        
+        try {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Creating...';
+            
+            const response = await fetch('/api/create-conversation', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    title: document.getElementById('conversationTitle').value,
+                    systemInstruction: document.getElementById('systemInstruction').value
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // Redirect to the new conversation
+                window.location.href = `/conversation/${result.conversationId}`;
+            } else {
+                // Handle error properly - check if result.error is an object
+                let errorMessage = result.error;
+                if (typeof errorMessage === 'object') {
+                    errorMessage = errorMessage.message || errorMessage.error || JSON.stringify(errorMessage);
+                }
+                showAlert('error', errorMessage || 'Failed to create conversation');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalText;
+            }
+        } catch (error) {
+            console.error('Conversation creation error:', error);
+            showAlert('error', 'Network error: ' + error.message);
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
+        }
+    });
+    
+    // Auto-focus on title field when modal opens
+    document.getElementById('newConversationModal').addEventListener('shown.bs.modal', function() {
+        document.getElementById('conversationTitle').focus();
+    });
+});
+
+// Debug function to test backend connection
+async function testBackendConnection() {
+    try {
+        console.log('Testing backend connection...');
+        
+        // Test session data
+        const sessionResponse = await fetch('/api/debug/session');
+        const sessionData = await sessionResponse.json();
+        console.log('Session data:', sessionData);
+        
+        // Test backend endpoints
+        const backendResponse = await fetch('/api/debug/backend-test');
+        const backendData = await backendResponse.json();
+        console.log('Backend test results:', backendData);
+        
+        // Show results in a more readable format
+        const results = {
+            'Session Info': sessionData,
+            'Backend Tests': backendData
+        };
+        
+        // Create a modal or alert with the results
+        const resultText = JSON.stringify(results, null, 2);
+        
+        // Create a temporary modal to show debug info
+        const debugModal = document.createElement('div');
+        debugModal.innerHTML = `
+            <div class="modal fade" id="debugModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Debug Information</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <pre style="max-height: 400px; overflow-y: auto; background: #f8f9fa; padding: 15px; border-radius: 5px; font-size: 12px;">${resultText}</pre>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(debugModal);
+        const modal = new bootstrap.Modal(document.getElementById('debugModal'));
+        modal.show();
+        
+        // Clean up modal after it's hidden
+        document.getElementById('debugModal').addEventListener('hidden.bs.modal', function() {
+            debugModal.remove();
+        });
+        
+        showAlert('info', 'Debug information logged to console and displayed in modal');
+        
+    } catch (error) {
+        console.error('Debug test failed:', error);
+        showAlert('error', 'Debug test failed: ' + error.message);
+    }
+}
+</script>
+{% endblock %}

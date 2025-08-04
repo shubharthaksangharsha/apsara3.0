@@ -1,0 +1,936 @@
+{% extends "base.html" %}
+
+{% block title %}{{ conversation.title }} - Apsara AI{% endblock %}
+
+{% block content %}
+<div class="container-fluid h-100">
+    <div class="row h-100">
+        <!-- Settings Sidebar -->
+        <div class="col-lg-3 col-md-4 border-end bg-light" id="settings-sidebar">
+            <div class="p-3 h-100 d-flex flex-column">
+                <!-- Conversation Info -->
+                <div class="conversation-header mb-4">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <h6 class="mb-0">
+                            <i class="bi bi-chat-dots me-2"></i>Conversation
+                        </h6>
+                        <a href="{{ url_for('dashboard') }}" class="btn btn-sm btn-outline-secondary">
+                            <i class="bi bi-arrow-left"></i>
+                        </a>
+                    </div>
+                    <h5 class="text-truncate" title="{{ conversation.title }}">{{ conversation.title }}</h5>
+                    {% if conversation.config and conversation.config.rest and conversation.config.rest.systemInstruction %}
+                    <div class="system-instruction-preview mt-2">
+                        <small class="text-muted">
+                            <i class="bi bi-gear me-1"></i>System: {{ conversation.config.rest.systemInstruction[:50] }}...
+                        </small>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <!-- AI Configuration -->
+                <div class="ai-config-section flex-grow-1">
+                    <h6 class="mb-3">
+                        <i class="bi bi-sliders me-2"></i>AI Configuration
+                    </h6>
+                    
+                    <form id="ai-config-form">
+                        <!-- Model Selection -->
+                        <div class="mb-3">
+                            <label for="model" class="form-label small">Model</label>
+                            <select class="form-select form-select-sm" id="model">
+                                <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (Fast)</option>
+                                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Advanced)</option>
+                            </select>
+                            <small class="form-text text-muted">
+                                {% if user.role == 'guest' %}
+                                    Guest users can only use Flash model
+                                {% else %}
+                                    Pro model offers better quality but uses more quota
+                                {% endif %}
+                            </small>
+                        </div>
+                        
+                        <!-- Temperature -->
+                        <div class="mb-3">
+                            <label for="temperature" class="form-label small">
+                                Temperature: <span id="temp-value">0.7</span>
+                            </label>
+                            <input type="range" class="form-range" id="temperature" 
+                                   min="0" max="2" step="0.1" value="0.7">
+                            <div class="d-flex justify-content-between">
+                                <small class="text-muted">Focused</small>
+                                <small class="text-muted">Creative</small>
+                            </div>
+                        </div>
+                        
+                        <!-- Max Tokens -->
+                        <div class="mb-3">
+                            <label for="maxTokens" class="form-label small">Max Output Tokens</label>
+                            <select class="form-select form-select-sm" id="maxTokens">
+                                <option value="1024">1,024 (Short)</option>
+                                <option value="2048" selected>2,048 (Medium)</option>
+                                <option value="4096">4,096 (Long)</option>
+                                <option value="8192">8,192 (Very Long)</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Thinking Configuration -->
+                        <div class="thinking-config mb-3">
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="enableThinking" checked>
+                                <label class="form-check-label small" for="enableThinking">
+                                    <i class="bi bi-brain me-1"></i>AI Thinking Mode
+                                </label>
+                            </div>
+                            
+                            <div id="thinking-options" class="ps-3">
+                                <div class="mb-2">
+                                    <label for="thinkingBudget" class="form-label small">Thinking Budget</label>
+                                    <select class="form-select form-select-sm" id="thinkingBudget">
+                                        <option value="-1" selected>Dynamic (Recommended)</option>
+                                        <option value="0">Off</option>
+                                        <option value="1000">1,000 tokens</option>
+                                        <option value="2000">2,000 tokens</option>
+                                        <option value="5000">5,000 tokens</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="includeThoughts" checked>
+                                    <label class="form-check-label small" for="includeThoughts">
+                                        Show AI reasoning
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Usage Info for Guests -->
+                        {% if user.role == 'guest' and guest_limitations %}
+                        <div class="usage-info alert alert-warning py-2">
+                            <small>
+                                <i class="bi bi-info-circle me-1"></i>
+                                <strong>Trial Usage:</strong><br>
+                                {{ guest_limitations.remainingMessages }}/{{ guest_limitations.totalMessagesLimit }} messages remaining
+                            </small>
+                        </div>
+                        {% endif %}
+                    </form>
+                </div>
+                
+                <!-- Quick Actions -->
+                <div class="quick-actions mt-auto">
+                    <button class="btn btn-sm btn-outline-primary w-100 mb-2" onclick="clearMessages()">
+                        <i class="bi bi-trash me-2"></i>Clear Messages
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary w-100" onclick="exportConversation()">
+                        <i class="bi bi-download me-2"></i>Export Chat
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Chat Area -->
+        <div class="col-lg-9 col-md-8 d-flex flex-column h-100">
+            <!-- Chat Header -->
+            <div class="chat-header border-bottom p-3 bg-white">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center">
+                        <button class="btn btn-outline-secondary btn-sm me-3 d-md-none" id="toggle-sidebar">
+                            <i class="bi bi-sliders"></i>
+                        </button>
+                        <div>
+                            <h5 class="mb-0">{{ conversation.title }}</h5>
+                            <small class="text-muted">
+                                                            <i class="bi bi-robot me-1"></i>Apsara
+                            <span class="badge bg-success ms-2">Online</span>
+                            </small>
+                        </div>
+                    </div>
+                    <div class="chat-actions">
+                        <button class="btn btn-outline-secondary btn-sm" onclick="refreshMessages()">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Messages Container -->
+            <div class="messages-container flex-grow-1 p-3" id="messages-container">
+                <div id="messages-list">
+                    {% if messages %}
+                        {% for message in messages %}
+                            <div class="message {{ 'user-message' if message.role == 'user' else 'ai-message' }}" 
+                                 data-message-id="{{ message.messageId }}">
+                                <div class="message-content">
+                                    <div class="message-header">
+                                        <div class="message-avatar">
+                                            {% if message.role == 'user' %}
+                                                <i class="bi bi-person-circle"></i>
+                                            {% else %}
+                                                <i class="bi bi-robot"></i>
+                                            {% endif %}
+                                        </div>
+                                        <div class="message-info">
+                                            <span class="message-sender">
+                                                {% if message.role == 'user' %}
+                                                    {{ user.fullName }}
+                                                {% else %}
+                                                    Apsara
+                                                {% endif %}
+                                            </span>
+                                            <span class="message-time">
+                                                {% if message.createdAt %}
+                                                    {% if message.createdAt is string %}
+                                                        {{ message.createdAt[-8:-3] if message.createdAt|length > 8 else 'Now' }}
+                                                    {% else %}
+                                                        {{ message.createdAt.strftime('%H:%M') }}
+                                                    {% endif %}
+                                                {% else %}
+                                                    Now
+                                                {% endif %}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    {% if message.content and message.content.thoughts %}
+                                        <div class="ai-thoughts mt-2">
+                                            <details>
+                                                <summary class="text-muted small cursor-pointer">
+                                                    <i class="bi bi-brain me-1"></i><span class="thoughts-toggle">Show Thoughts process</span>
+                                                </summary>
+                                                <div class="thoughts-content mt-2 p-2 bg-light rounded">
+                                                    <div class="markdown-content">{{ message.content.thoughts }}</div>
+                                                </div>
+                                            </details>
+                                        </div>
+                                    {% endif %}
+                                    <div class="message-text">
+                                        {% if message.role == 'user' %}
+                                            {{ message.content.text if message.content.text else message.content }}
+                                        {% else %}
+                                            <div class="markdown-content">{{ message.content.text if message.content and message.content.text else message.content }}</div>
+                                        {% endif %}
+                                    </div>
+                                    {% if message.metadata and message.metadata.tokens %}
+                                        <div class="message-metadata mt-2">
+                                            <small class="text-muted">
+                                                <i class="bi bi-speedometer2 me-1"></i>
+                                                {{ message.metadata.tokens.totalTokenCount or message.metadata.tokens.total or 0 }} tokens
+                                                {% if message.metadata.timing %}
+                                                    • {{ message.metadata.timing.processingTimeMs }}ms
+                                                {% endif %}
+                                            </small>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="empty-chat-state text-center py-5">
+                            <i class="bi bi-chat-dots text-muted" style="font-size: 3rem;"></i>
+                            <h5 class="mt-3 text-muted">Start the conversation</h5>
+                            <p class="text-muted">Send your first message to begin chatting with AI</p>
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <!-- Typing Indicator -->
+                <div id="typing-indicator" class="message ai-message" style="display: none;">
+                    <div class="message-content">
+                        <div class="message-header">
+                            <div class="message-avatar">
+                                <i class="bi bi-robot"></i>
+                            </div>
+                            <div class="message-info">
+                                <span class="message-sender">Apsara</span>
+                                <span class="message-time">typing...</span>
+                            </div>
+                        </div>
+                        <div class="message-text">
+                            <div class="typing-dots">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- File Attachments Preview -->
+            <div id="file-attachments" class="file-attachments p-3 border-top" style="display: none;">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <h6 class="mb-0">
+                        <i class="bi bi-paperclip me-2"></i>Attached Files
+                    </h6>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="clearAllFiles()">
+                        <i class="bi bi-x"></i> Clear All
+                    </button>
+                </div>
+                <div id="attached-files-list" class="d-flex flex-wrap gap-2">
+                    <!-- Files will be added here dynamically -->
+                </div>
+            </div>
+            
+            <!-- Message Input -->
+            <div class="message-input-container border-top p-3 bg-white">
+                <form id="message-form" class="position-relative">
+                    <div class="input-group">
+                        <button class="btn btn-outline-secondary" type="button" id="file-upload-btn">
+                            <i class="bi bi-paperclip"></i>
+                        </button>
+                        <textarea class="form-control" id="message-input" 
+                                  placeholder="Type your message..." rows="1" 
+                                  style="resize: none; max-height: 120px;"></textarea>
+                        <button class="btn btn-primary" type="submit" id="send-btn" disabled>
+                            <i class="bi bi-send"></i>
+                        </button>
+                    </div>
+                    <input type="file" id="file-input" multiple accept="image/*,audio/*,video/*,.pdf,.txt,.csv" style="display: none;">
+                </form>
+                
+                <div class="input-hints mt-2">
+                    <small class="text-muted">
+                        <i class="bi bi-lightbulb me-1"></i>
+                        Tip: You can attach images, documents, audio, and video files for AI analysis.
+                        Press Enter to send, Shift+Enter for new line.
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<!-- Markdown rendering -->
+<script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+<script>
+// Global variables
+let attachedFiles = [];
+let conversationId = '{{ conversation.conversationId }}';
+const currentUser = {
+    name: '{{ user.fullName }}',
+    role: '{{ user.role }}'
+};
+
+// Configure marked for markdown rendering
+marked.setOptions({
+    breaks: true,
+    gfm: true
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    initializeChatInterface();
+    
+    // Render existing markdown content
+    document.querySelectorAll('.markdown-content').forEach(element => {
+        const text = element.textContent;
+        element.innerHTML = marked.parse(text);
+    });
+    
+    // Add click handlers to existing thoughts toggles
+    document.querySelectorAll('.ai-thoughts summary').forEach(summary => {
+        const toggleSpan = summary.querySelector('.thoughts-toggle');
+        if (toggleSpan) {
+            summary.addEventListener('click', (e) => {
+                e.preventDefault();
+                const details = summary.closest('details');
+                details.toggleAttribute('open');
+                toggleSpan.textContent = details.hasAttribute('open') ? 'Hide Thoughts process' : 'Show Thoughts process';
+            });
+        }
+    });
+});
+
+function initializeChatInterface() {
+    // Elements
+    const messageForm = document.getElementById('message-form');
+    const messageInput = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    const fileUploadBtn = document.getElementById('file-upload-btn');
+    const fileInput = document.getElementById('file-input');
+    const messagesContainer = document.getElementById('messages-container');
+    const temperatureSlider = document.getElementById('temperature');
+    const tempValue = document.getElementById('temp-value');
+    const enableThinking = document.getElementById('enableThinking');
+    const thinkingOptions = document.getElementById('thinking-options');
+    
+    // Auto-resize textarea
+    messageInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        
+        // Enable/disable send button
+        sendBtn.disabled = !this.value.trim() && attachedFiles.length === 0;
+    });
+    
+    // Temperature slider
+    temperatureSlider.addEventListener('input', function() {
+        tempValue.textContent = this.value;
+    });
+    
+    // Thinking mode toggle
+    enableThinking.addEventListener('change', function() {
+        thinkingOptions.style.display = this.checked ? 'block' : 'none';
+    });
+    
+    // Guest model restriction
+    const isGuest = currentUser.role === 'guest';
+    if (isGuest) {
+        document.getElementById('model').addEventListener('change', function() {
+            if (this.value !== 'gemini-2.5-flash') {
+                this.value = 'gemini-2.5-flash';
+                showAlert('warning', 'Guest users can only use Gemini 2.5 Flash model');
+            }
+        });
+    }
+    
+    // File upload
+    fileUploadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', handleFileUpload);
+    
+    // Message form submission
+    messageForm.addEventListener('submit', handleMessageSubmit);
+    
+    // Keyboard shortcuts
+    messageInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (!sendBtn.disabled) {
+                handleMessageSubmit(e);
+            }
+        }
+    });
+    
+    // Sidebar toggle for mobile
+    document.getElementById('toggle-sidebar')?.addEventListener('click', function() {
+        const sidebar = document.getElementById('settings-sidebar');
+        sidebar.classList.toggle('show-mobile');
+    });
+    
+    // Auto-scroll to bottom
+    scrollToBottom();
+}
+
+async function handleFileUpload(event) {
+    const files = Array.from(event.target.files);
+    const fileAttachmentsDiv = document.getElementById('file-attachments');
+    const attachedFilesList = document.getElementById('attached-files-list');
+    
+    for (const file of files) {
+        try {
+            showAlert('info', `Uploading ${file.name}...`);
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('storageMethod', 'google-file-api');
+            formData.append('conversationId', conversationId);
+            
+            const response = await fetch('/api/upload-file', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                const fileData = result.file;
+                attachedFiles.push(fileData);
+                
+                // Add file preview
+                const filePreview = createFilePreview(fileData);
+                attachedFilesList.appendChild(filePreview);
+                
+                fileAttachmentsDiv.style.display = 'block';
+                
+                showAlert('success', `${file.name} uploaded successfully`);
+            } else {
+                showAlert('error', `Failed to upload ${file.name}: ${result.error}`);
+            }
+        } catch (error) {
+            showAlert('error', `Error uploading ${file.name}: ${error.message}`);
+        }
+    }
+    
+    // Clear file input
+    event.target.value = '';
+    updateSendButton();
+}
+
+function createFilePreview(fileData) {
+    const fileDiv = document.createElement('div');
+    fileDiv.className = 'file-preview d-flex align-items-center bg-light rounded p-2';
+    fileDiv.dataset.fileId = fileData.id;
+    
+    const icon = getFileIcon(fileData.type);
+    const sizeFormatted = formatFileSize(fileData.size);
+    
+    fileDiv.innerHTML = `
+        <i class="bi ${icon} me-2 text-primary"></i>
+        <div class="file-info flex-grow-1">
+            <div class="file-name small fw-bold">${fileData.name}</div>
+            <div class="file-size text-muted" style="font-size: 0.75rem;">${sizeFormatted}</div>
+        </div>
+        <button class="btn btn-sm btn-outline-danger" onclick="removeFile('${fileData.id}')">
+            <i class="bi bi-x"></i>
+        </button>
+    `;
+    
+    return fileDiv;
+}
+
+function getFileIcon(mimeType) {
+    if (mimeType.startsWith('image/')) return 'bi-file-earmark-image';
+    if (mimeType.startsWith('audio/')) return 'bi-file-earmark-music';
+    if (mimeType.startsWith('video/')) return 'bi-file-earmark-play';
+    if (mimeType === 'application/pdf') return 'bi-file-earmark-pdf';
+    if (mimeType.startsWith('text/')) return 'bi-file-earmark-text';
+    return 'bi-file-earmark';
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function removeFile(fileId) {
+    attachedFiles = attachedFiles.filter(f => f.id !== fileId);
+    const filePreview = document.querySelector(`[data-file-id="${fileId}"]`);
+    filePreview?.remove();
+    
+    if (attachedFiles.length === 0) {
+        document.getElementById('file-attachments').style.display = 'none';
+    }
+    
+    updateSendButton();
+}
+
+function clearAllFiles() {
+    attachedFiles = [];
+    document.getElementById('attached-files-list').innerHTML = '';
+    document.getElementById('file-attachments').style.display = 'none';
+    updateSendButton();
+}
+
+function updateSendButton() {
+    const messageInput = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    sendBtn.disabled = !messageInput.value.trim() && attachedFiles.length === 0;
+}
+
+async function handleMessageSubmit(event) {
+    event.preventDefault();
+    
+    const messageInput = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    const message = messageInput.value.trim();
+    
+    if (!message && attachedFiles.length === 0) return;
+    
+    // Get AI configuration
+    const config = {
+        model: document.getElementById('model').value,
+        temperature: parseFloat(document.getElementById('temperature').value),
+        maxTokens: parseInt(document.getElementById('maxTokens').value),
+        includeThoughts: document.getElementById('includeThoughts').checked,
+        thinkingBudget: parseInt(document.getElementById('thinkingBudget').value)
+    };
+    
+    // Disable form
+    sendBtn.disabled = true;
+    messageInput.disabled = true;
+    
+    try {
+        // Add user message to UI immediately
+        if (message) {
+            addMessageToUI('user', message, new Date());
+        }
+        
+        // Show typing indicator
+        showTypingIndicator();
+        
+        // Prepare request data
+        const requestData = {
+            conversationId: conversationId,
+            message: message || "Please analyze the attached files.",
+            model: config.model,
+            temperature: config.temperature,
+            maxTokens: config.maxTokens,
+            includeThoughts: config.includeThoughts,
+            thinkingBudget: config.thinkingBudget,
+            files: attachedFiles.map(f => f.id)
+        };
+        
+        // Send message
+        const response = await fetch('/api/send-message', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
+        });
+        
+        const result = await response.json();
+        
+        // Hide typing indicator
+        hideTypingIndicator();
+        
+        if (result.success) {
+            // Add AI response to UI with streaming
+            const aiMessage = result.aiResponse;
+            const aiText = aiMessage.content?.text || aiMessage.content;
+            const thoughts = result.thoughts;
+            
+            // Stream thoughts first, then the main response
+            if (thoughts) {
+                // Create a combined message with both thoughts and response
+                streamAIResponse(aiText, thoughts, result.metadata);
+            } else {
+                // Just add the response with streaming
+                addMessageToUI('ai', aiText, new Date(), null, result.metadata, true);
+            }
+            
+            // Update guest usage counter if user is guest and we have updated limitations
+            if (isGuest && result.updatedGuestLimitations) {
+                updateGuestUsageCounterWithData(result.updatedGuestLimitations);
+            } else if (isGuest) {
+                // Fallback: decrement manually if no backend data
+                updateGuestUsageCounter();
+            }
+            
+            // Clear input and files
+            messageInput.value = '';
+            clearAllFiles();
+            
+            showAlert('success', 'Message sent successfully');
+        } else {
+            showAlert('error', result.error || 'Failed to send message');
+        }
+    } catch (error) {
+        hideTypingIndicator();
+        showAlert('error', 'Network error: ' + error.message);
+    } finally {
+        // Re-enable form
+        sendBtn.disabled = false;
+        messageInput.disabled = false;
+        messageInput.focus();
+        updateSendButton();
+    }
+}
+
+function addMessageToUI(role, text, timestamp, thoughts = null, metadata = null, streaming = false) {
+    const messagesList = document.getElementById('messages-list');
+    const emptyState = messagesList.querySelector('.empty-chat-state');
+    
+    if (emptyState) {
+        emptyState.remove();
+    }
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${role}-message`;
+    
+    const timeStr = timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    const userName = role === 'user' ? currentUser.name : 'Apsara';
+    const icon = role === 'user' ? 'bi-person-circle' : 'bi-robot';
+    
+    // Render markdown for AI responses
+    const renderedText = role === 'ai' ? marked.parse(text) : text;
+    
+    let thoughtsHtml = '';
+    if (thoughts) {
+        const renderedThoughts = marked.parse(thoughts);
+        thoughtsHtml = `
+            <div class="ai-thoughts mt-2">
+                <details open>
+                    <summary class="text-muted small cursor-pointer">
+                        <i class="bi bi-brain me-1"></i><span class="thoughts-toggle">Hide Thoughts process</span>
+                    </summary>
+                    <div class="thoughts-content mt-2 p-2 bg-light rounded">
+                        ${renderedThoughts}
+                    </div>
+                </details>
+            </div>
+        `;
+    }
+    
+    let metadataHtml = '';
+    if (metadata) {
+        const tokens = metadata.tokens?.totalTokenCount || metadata.tokens?.total || 0;
+        metadataHtml = `
+            <div class="message-metadata mt-2">
+                <small class="text-muted">
+                    <i class="bi bi-speedometer2 me-1"></i>
+                    ${tokens} tokens • ${metadata.model}
+                </small>
+            </div>
+        `;
+    }
+    
+    messageDiv.innerHTML = `
+        <div class="message-content">
+            <div class="message-header">
+                <div class="message-avatar">
+                    <i class="bi ${icon}"></i>
+                </div>
+                <div class="message-info">
+                    <span class="message-sender">${userName}</span>
+                    <span class="message-time">${timeStr}</span>
+                </div>
+            </div>
+            ${thoughts ? thoughtsHtml : ''}
+            <div class="message-text">${streaming ? '<span class="streaming-text"></span>' : renderedText}</div>
+            ${metadataHtml}
+        </div>
+    `;
+    
+    messagesList.appendChild(messageDiv);
+    
+    // Add click handler for thoughts toggle
+    if (thoughts) {
+        const summary = messageDiv.querySelector('.ai-thoughts summary');
+        const toggleSpan = summary.querySelector('.thoughts-toggle');
+        summary.addEventListener('click', (e) => {
+            e.preventDefault();
+            const details = messageDiv.querySelector('.ai-thoughts details');
+            details.toggleAttribute('open');
+            toggleSpan.textContent = details.hasAttribute('open') ? 'Hide Thoughts process' : 'Show Thoughts process';
+        });
+    }
+    
+    // If streaming, start the animation
+    if (streaming && role === 'ai') {
+        const streamingElement = messageDiv.querySelector('.streaming-text');
+        streamText(streamingElement, renderedText, 8); // Much faster: 8ms per character
+    }
+    
+    scrollToBottom();
+    return messageDiv;
+}
+
+function streamText(element, text, speed = 30) {
+    let index = 0;
+    element.innerHTML = '';
+    
+    function typeChar() {
+        if (index < text.length) {
+            element.innerHTML = text.substring(0, index + 1);
+            index++;
+            setTimeout(typeChar, speed);
+        }
+    }
+    
+    typeChar();
+}
+
+function streamAIResponse(aiText, thoughts, metadata) {
+    const messagesList = document.getElementById('messages-list');
+    const emptyState = messagesList.querySelector('.empty-chat-state');
+    
+    if (emptyState) {
+        emptyState.remove();
+    }
+    
+    // Create the message container
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message ai-message';
+    
+    const timeStr = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    const renderedThoughts = marked.parse(thoughts);
+    const renderedText = marked.parse(aiText);
+    
+    let metadataHtml = '';
+    if (metadata) {
+        const tokens = metadata.tokens?.totalTokenCount || metadata.tokens?.total || 0;
+        metadataHtml = `
+            <div class="message-metadata mt-2">
+                <small class="text-muted">
+                    <i class="bi bi-speedometer2 me-1"></i>
+                    ${tokens} tokens • ${metadata.model}
+                </small>
+            </div>
+        `;
+    }
+    
+    messageDiv.innerHTML = `
+        <div class="message-content">
+            <div class="message-header">
+                <div class="message-avatar">
+                    <i class="bi bi-robot"></i>
+                </div>
+                <div class="message-info">
+                    <span class="message-sender">Apsara</span>
+                    <span class="message-time">${timeStr}</span>
+                </div>
+            </div>
+            <div class="ai-thoughts mt-2">
+                <details open>
+                    <summary class="text-muted small cursor-pointer">
+                        <i class="bi bi-brain me-1"></i><span class="thoughts-toggle">Hide Thoughts process</span>
+                    </summary>
+                    <div class="thoughts-content mt-2 p-2 bg-light rounded">
+                        <span class="streaming-thoughts"></span>
+                    </div>
+                </details>
+            </div>
+            <div class="message-text"><span class="streaming-response"></span></div>
+            ${metadataHtml}
+        </div>
+    `;
+    
+    messagesList.appendChild(messageDiv);
+    
+    // Add click handler for thoughts toggle
+    const summary = messageDiv.querySelector('.ai-thoughts summary');
+    const toggleSpan = summary.querySelector('.thoughts-toggle');
+    summary.addEventListener('click', (e) => {
+        e.preventDefault();
+        const details = messageDiv.querySelector('.ai-thoughts details');
+        details.toggleAttribute('open');
+        toggleSpan.textContent = details.hasAttribute('open') ? 'Hide Thoughts process' : 'Show Thoughts process';
+    });
+    
+    // Stream thoughts first (much faster)
+    const thoughtsElement = messageDiv.querySelector('.streaming-thoughts');
+    streamText(thoughtsElement, renderedThoughts, 5); // Much faster: 5ms per character
+    
+    // Stream main response after thoughts are done (faster)
+    setTimeout(() => {
+        const responseElement = messageDiv.querySelector('.streaming-response');
+        streamText(responseElement, renderedText, 8); // Much faster: 8ms per character
+    }, renderedThoughts.length * 5 + 200); // Wait for thoughts to finish + 200ms
+    
+    scrollToBottom();
+}
+
+function showTypingIndicator() {
+    document.getElementById('typing-indicator').style.display = 'block';
+    scrollToBottom();
+}
+
+function hideTypingIndicator() {
+    document.getElementById('typing-indicator').style.display = 'none';
+}
+
+function scrollToBottom() {
+    const container = document.getElementById('messages-container');
+    setTimeout(() => {
+        container.scrollTop = container.scrollHeight;
+    }, 100);
+}
+
+async function refreshMessages() {
+    try {
+        const response = await fetch(`/api/get-messages/${conversationId}`);
+        const result = await response.json();
+        
+        if (result.success) {
+            // Rebuild messages list
+            const messagesList = document.getElementById('messages-list');
+            messagesList.innerHTML = '';
+            
+            if (result.messages.length === 0) {
+                messagesList.innerHTML = `
+                    <div class="empty-chat-state text-center py-5">
+                        <i class="bi bi-chat-dots text-muted" style="font-size: 3rem;"></i>
+                        <h5 class="mt-3 text-muted">Start the conversation</h5>
+                        <p class="text-muted">Send your first message to begin chatting with AI</p>
+                    </div>
+                `;
+            } else {
+                result.messages.forEach(message => {
+                    const role = message.role;
+                    const text = message.content?.text || message.content;
+                    const thoughts = message.content?.thoughts;
+                    const timestamp = new Date(message.createdAt);
+                    const metadata = message.metadata;
+                    
+                    addMessageToUI(role, text, timestamp, thoughts, metadata, false); // No streaming for existing messages
+                });
+            }
+            
+            scrollToBottom();
+        }
+    } catch (error) {
+        showAlert('error', 'Failed to refresh messages');
+    }
+}
+
+function clearMessages() {
+    if (confirm('Are you sure you want to clear all messages? This action cannot be undone.')) {
+        showAlert('info', 'Clear messages functionality will be implemented soon');
+    }
+}
+
+function exportConversation() {
+    showAlert('info', 'Export functionality will be implemented soon');
+}
+
+function updateGuestUsageCounter() {
+    // Update the usage counter in the sidebar
+    const usageInfo = document.querySelector('.usage-info small');
+    if (usageInfo) {
+        // Extract current numbers
+        const currentText = usageInfo.textContent;
+        const match = currentText.match(/(\d+)\/(\d+) messages remaining/);
+        if (match) {
+            const remaining = parseInt(match[1]) - 1;
+            const total = parseInt(match[2]);
+            
+            // Update the text
+            usageInfo.innerHTML = `
+                <i class="bi bi-info-circle me-1"></i>
+                <strong>Trial Usage:</strong><br>
+                ${remaining}/${total} messages remaining
+            `;
+            
+            // Update progress bar if it exists
+            const progressBar = document.querySelector('.progress-bar[data-progress]');
+            if (progressBar) {
+                const used = total - remaining;
+                const percentage = Math.min((used / total) * 100, 100);
+                progressBar.style.width = percentage + '%';
+            }
+            
+            // Show warning if running low
+            if (remaining <= 1) {
+                showAlert('warning', `Only ${remaining} message${remaining === 1 ? '' : 's'} remaining in your trial!`);
+            }
+        }
+    }
+}
+
+function updateGuestUsageCounterWithData(guestLimitations) {
+    // Update the usage counter with backend data
+    const usageInfo = document.querySelector('.usage-info small');
+    if (usageInfo && guestLimitations) {
+        const remaining = guestLimitations.remainingMessages || 0;
+        const total = guestLimitations.totalMessagesLimit || 5;
+        
+        // Update the text
+        usageInfo.innerHTML = `
+            <i class="bi bi-info-circle me-1"></i>
+            <strong>Trial Usage:</strong><br>
+            ${remaining}/${total} messages remaining
+        `;
+        
+        // Update progress bar if it exists
+        const progressBar = document.querySelector('.progress-bar[data-progress]');
+        if (progressBar) {
+            const used = guestLimitations.totalMessagesUsed || (total - remaining);
+            const percentage = Math.min((used / total) * 100, 100);
+            progressBar.style.width = percentage + '%';
+            progressBar.dataset.progress = used;
+        }
+        
+        // Show warning if running low
+        if (remaining <= 1) {
+            showAlert('warning', `Only ${remaining} message${remaining === 1 ? '' : 's'} remaining in your trial!`);
+        }
+    }
+}
+</script>
+{% endblock %}

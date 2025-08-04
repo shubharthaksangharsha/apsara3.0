@@ -417,10 +417,10 @@ router.post('/generate', asyncHandler(async (req, res) => {
     }
     
     // Add current user message with files and text
-    messages.push({
-      role: 'user',
+      messages.push({
+        role: 'user',
       parts: messageParts
-    });
+      });
 
     // Prepare generation config
     const generationConfig = {

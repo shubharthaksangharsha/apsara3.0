@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Apsara AI{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center min-vh-100 align-items-center">
+        <div class="col-md-6 col-lg-4">
+            <div class="card shadow-lg border-0">
+                <div class="card-header bg-primary text-white text-center py-4">
+                    <h3 class="mb-0">
+                        <i class="bi bi-box-arrow-in-right me-2"></i>Welcome Back
+                    </h3>
+                    <p class="mb-0 mt-2 opacity-75">Sign in to your account</p>
+                </div>
+                
+                <div class="card-body p-5">
+                    <form id="login-form">
+                        <div class="mb-3">
+                            <label for="email" class="form-label">Email Address</label>
+                            <div class="input-group">
+                                <span class="input-group-text">
+                                    <i class="bi bi-envelope"></i>
+                                </span>
+                                <input type="email" class="form-control" id="email" required autofocus>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Password</label>
+                            <div class="input-group">
+                                <span class="input-group-text">
+                                    <i class="bi bi-lock"></i>
+                                </span>
+                                <input type="password" class="form-control" id="password" required>
+                                <button class="btn btn-outline-secondary" type="button" id="togglePassword">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3 d-flex justify-content-between align-items-center">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="rememberMe">
+                                <label class="form-check-label" for="rememberMe">
+                                    Remember me
+                                </label>
+                            </div>
+                            <a href="#" class="text-primary small">Forgot password?</a>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary w-100 mb-3" id="login-btn">
+                            <i class="bi bi-box-arrow-in-right me-2"></i>Sign In
+                        </button>
+                    </form>
+                    
+                    <div class="text-center mb-3">
+                        <small class="text-muted">or</small>
+                    </div>
+                    
+                    <!-- Google Login Button -->
+                    <button class="btn btn-outline-danger w-100 mb-3" id="google-login-btn">
+                        <i class="bi bi-google me-2"></i>Continue with Google
+                    </button>
+                    
+                    <!-- Guest Login Button -->
+                    <button class="btn btn-outline-secondary w-100" id="guest-login-btn">
+                        <i class="bi bi-person-dash me-2"></i>Try as Guest
+                        <small class="d-block mt-1">5 free messages • No registration required</small>
+                    </button>
+                </div>
+                
+                <div class="card-footer text-center py-3">
+                    <small class="text-muted">
+                        Don't have an account? 
+                        <a href="{{ url_for('register') }}" class="text-primary">Create one here</a>
+                    </small>
+                </div>
+            </div>
+            
+            <!-- Features Preview -->
+            <div class="mt-4">
+                <div class="row text-center">
+                    <div class="col-4">
+                        <div class="feature-preview">
+                            <i class="bi bi-chat-dots text-primary mb-2" style="font-size: 1.5rem;"></i>
+                            <small class="text-muted d-block">Smart Chat</small>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="feature-preview">
+                            <i class="bi bi-file-earmark-image text-primary mb-2" style="font-size: 1.5rem;"></i>
+                            <small class="text-muted d-block">File Analysis</small>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="feature-preview">
+                            <i class="bi bi-brain text-primary mb-2" style="font-size: 1.5rem;"></i>
+                            <small class="text-muted d-block">AI Thinking</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Modal -->
+<div class="modal fade" id="loadingModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <h5 id="loading-text">Signing you in...</h5>
+                <p class="text-muted mb-0" id="loading-subtext">Please wait a moment.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const loginForm = document.getElementById('login-form');
+    const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
+    const loadingText = document.getElementById('loading-text');
+    const loadingSubtext = document.getElementById('loading-subtext');
+    
+    // Password visibility toggle
+    document.getElementById('togglePassword').addEventListener('click', function() {
+        const password = document.getElementById('password');
+        const icon = this.querySelector('i');
+        
+        if (password.type === 'password') {
+            password.type = 'text';
+            icon.className = 'bi bi-eye-slash';
+        } else {
+            password.type = 'password';
+            icon.className = 'bi bi-eye';
+        }
+    });
+    
+    // Login form submission
+    loginForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        try {
+            loadingText.textContent = 'Signing you in...';
+            loadingSubtext.textContent = 'Verifying your credentials.';
+            loadingModal.show();
+            
+            const response = await fetch('/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    email: document.getElementById('email').value,
+                    password: document.getElementById('password').value
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                loadingText.textContent = 'Login successful!';
+                loadingSubtext.textContent = 'Redirecting to dashboard...';
+                setTimeout(() => {
+                    window.location.href = result.redirect;
+                }, 1000);
+            } else {
+                loadingModal.hide();
+                showAlert('error', result.error);
+            }
+        } catch (error) {
+            loadingModal.hide();
+            showAlert('error', 'Network error: ' + error.message);
+        }
+    });
+    
+    // Google login (placeholder)
+    document.getElementById('google-login-btn').addEventListener('click', function() {
+        showAlert('info', 'Google OAuth integration will be implemented in the next phase');
+    });
+    
+    // Guest login
+    document.getElementById('guest-login-btn').addEventListener('click', async function() {
+        try {
+            loadingText.textContent = 'Creating guest session...';
+            loadingSubtext.textContent = 'Setting up your trial access.';
+            loadingModal.show();
+            
+            const response = await fetch('/guest-login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                loadingText.textContent = 'Guest session created!';
+                loadingSubtext.textContent = 'Redirecting to dashboard...';
+                setTimeout(() => {
+                    window.location.href = result.redirect;
+                }, 1000);
+            } else {
+                loadingModal.hide();
+                showAlert('error', result.error);
+            }
+        } catch (error) {
+            loadingModal.hide();
+            showAlert('error', 'Network error: ' + error.message);
+        }
+    });
+    
+    // Auto-focus on email field
+    document.getElementById('email').focus();
+});
+</script>
+{% endblock %}

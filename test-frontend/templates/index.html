@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %}Welcome to Apsara AI{% endblock %}
+
+{% block content %}
+<div class="hero-section">
+    <div class="container">
+        <div class="row min-vh-100 align-items-center">
+            <div class="col-lg-6">
+                <div class="hero-content">
+                    <h1 class="display-4 fw-bold text-primary mb-4">
+                        <i class="bi bi-robot"></i> Apsara AI
+                    </h1>
+                    <p class="lead mb-4">
+                        Experience the future of AI conversations with multi-provider support, 
+                        advanced thinking models, and powerful multimodal capabilities.
+                    </p>
+                    
+                    <div class="features-list mb-5">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="feature-item mb-3">
+                                    <i class="bi bi-chat-dots text-primary me-2"></i>
+                                    <span>Smart Conversations</span>
+                                </div>
+                                <div class="feature-item mb-3">
+                                    <i class="bi bi-file-earmark-image text-primary me-2"></i>
+                                    <span>File Analysis</span>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="feature-item mb-3">
+                                    <i class="bi bi-brain text-primary me-2"></i>
+                                    <span>AI Thinking Mode</span>
+                                </div>
+                                <div class="feature-item mb-3">
+                                    <i class="bi bi-shield-check text-primary me-2"></i>
+                                    <span>Secure & Private</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="cta-buttons">
+                        <a href="{{ url_for('register') }}" class="btn btn-primary btn-lg me-3">
+                            <i class="bi bi-person-plus me-2"></i>Get Started
+                        </a>
+                        <a href="{{ url_for('login') }}" class="btn btn-outline-primary btn-lg me-3">
+                            <i class="bi bi-box-arrow-in-right me-2"></i>Sign In
+                        </a>
+                        <button id="guest-login-btn" class="btn btn-outline-secondary btn-lg">
+                            <i class="bi bi-person-dash me-2"></i>Try as Guest
+                        </button>
+                    </div>
+                    
+                    <div class="guest-info mt-3">
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Guest access includes 5 free messages with gemini-2.5-flash model
+                        </small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-6">
+                <div class="hero-image text-center">
+                    <div class="chat-preview-card">
+                        <div class="card shadow-lg border-0">
+                            <div class="card-header bg-primary text-white">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-robot me-2"></i>
+                                    <span class="fw-bold">Apsara</span>
+                                    <span class="badge bg-success ms-auto">Online</span>
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="chat-preview">
+                                    <div class="message user-message">
+                                        <div class="message-bubble">
+                                            <i class="bi bi-file-earmark-image me-2"></i>
+                                            Analyze this image for me
+                                        </div>
+                                    </div>
+                                    <div class="message ai-message">
+                                        <div class="message-bubble">
+                                            <i class="bi bi-robot me-2"></i>
+                                            I can see a beautiful landscape with mountains...
+                                            <small class="d-block mt-1 text-muted">
+                                                <i class="bi bi-brain me-1"></i>Thinking mode enabled
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-footer">
+                                <div class="input-group">
+                                    <button class="btn btn-outline-secondary" disabled>
+                                        <i class="bi bi-paperclip"></i>
+                                    </button>
+                                    <input type="text" class="form-control" placeholder="Type your message..." disabled>
+                                    <button class="btn btn-primary" disabled>
+                                        <i class="bi bi-send"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Modal -->
+<div class="modal fade" id="loadingModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <h5>Setting up your guest session...</h5>
+                <p class="text-muted mb-0">This will only take a moment.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const guestLoginBtn = document.getElementById('guest-login-btn');
+    const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
+    
+    guestLoginBtn.addEventListener('click', async function() {
+        try {
+            loadingModal.show();
+            
+            const response = await fetch('/guest-login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                window.location.href = result.redirect;
+            } else {
+                loadingModal.hide();
+                showAlert('error', result.error || 'Guest login failed');
+            }
+        } catch (error) {
+            loadingModal.hide();
+            showAlert('error', 'Network error: ' + error.message);
+        }
+    });
+});
+</script>
+{% endblock %}
