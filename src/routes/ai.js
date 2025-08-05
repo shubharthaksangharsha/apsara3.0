@@ -1078,39 +1078,52 @@ router.post('/regenerate', asyncHandler(async (req, res) => {
       }
     }
 
-    // Get the user message that preceded this AI message
-    const precedingUserMessage = await Message.findOne({
+    // Get the user or tool message that preceded this AI message
+    const precedingMessage = await Message.findOne({
       conversationId,
       userId,
-      role: 'user',
+      role: { $in: ['user', 'tool'] }, // Accept both user messages and tool/plugin messages
       messageSequence: { $lt: messageToRegenerate.messageSequence }
     }).sort({ messageSequence: -1 });
 
-    if (!precedingUserMessage) {
+    if (!precedingMessage) {
       return res.status(400).json({
         success: false,
         error: 'Cannot regenerate',
-        details: 'No user message found preceding this AI response'
+        details: 'No user or tool message found preceding this AI response'
       });
     }
 
-    // Delete all messages after the user message (including the current AI message)
+    // Delete all messages after the preceding message (including the current AI message)
     const deleteResult = await Message.deleteMany({
       conversationId,
       userId,
-      messageSequence: { $gt: precedingUserMessage.messageSequence }
+      messageSequence: { $gt: precedingMessage.messageSequence }
     });
 
-    // Get conversation history up to the user message
+    // Get conversation history up to the preceding message
     const historyMessages = await Message.getConversationHistory(conversationId, false);
     const conversationHistory = formatConversationHistory(historyMessages);
 
-    // Prepare messages for AI (include history + user message)
+    // Prepare messages for AI (include history + preceding message)
     let messages = [...conversationHistory];
-    messages.push({
-      role: 'user',
-      parts: [{ text: precedingUserMessage.content.text }]
-    });
+    
+    // Handle different message types appropriately
+    if (precedingMessage.role === 'user') {
+      // Regular user message
+      messages.push({
+        role: 'user',
+        parts: [{ text: precedingMessage.content.text }]
+      });
+    } else if (precedingMessage.role === 'tool') {
+      // Tool/plugin message - format for AI understanding
+      messages.push({
+        role: 'user',
+        parts: [{ 
+          text: `Plugin "${precedingMessage.metadata?.plugin || 'unknown'}" executed with result: ${precedingMessage.content.text}` 
+        }]
+      });
+    }
 
     // Prepare generation config
     const generationConfig = {

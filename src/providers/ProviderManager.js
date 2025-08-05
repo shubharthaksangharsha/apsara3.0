@@ -90,7 +90,7 @@ export class ProviderManager {
   }
 
   /**
-   * Generate content using specified or default provider
+   * Generate content using specified or default provider (now uses streaming internally)
    * @param {Object} params - Generation parameters
    * @param {string} params.provider - Provider name (optional)
    * @returns {Promise<Object>} Generated response
@@ -98,7 +98,64 @@ export class ProviderManager {
   async generateContent(params) {
     const { provider: providerName, ...restParams } = params;
     const provider = this.getProvider(providerName);
-    return await provider.generateContent(restParams);
+    
+    // Always use streaming internally and accumulate the result
+    let fullText = '';
+    let fullThoughts = '';
+    let lastChunk = null;
+    let usageMetadata = null;
+    let finishReason = null;
+    let hasThoughtSignatures = false;
+
+    try {
+      // Use the streaming generator
+      for await (const chunk of provider.generateContentStream(restParams)) {
+        lastChunk = chunk;
+        
+        // Accumulate text content
+        if (chunk.text) {
+          fullText += chunk.text;
+        }
+        
+        // Accumulate thoughts
+        if (chunk.thought) {
+          fullThoughts += chunk.thought;
+        }
+        
+        // Update metadata from last chunk
+        if (chunk.usageMetadata) {
+          usageMetadata = chunk.usageMetadata;
+        }
+        
+        if (chunk.finishReason) {
+          finishReason = chunk.finishReason;
+        }
+        
+        if (chunk.hasThoughtSignatures) {
+          hasThoughtSignatures = true;
+        }
+      }
+
+      // Return the accumulated result in the same format as non-streaming
+      return {
+        success: true,
+        provider: providerName || this.defaultProvider,
+        model: lastChunk?.model || restParams.model,
+        text: fullText,
+        thoughts: fullThoughts || null,
+        hasThoughtSignatures,
+        usageMetadata,
+        finishReason,
+        response: lastChunk // Keep the last chunk for compatibility
+      };
+    } catch (error) {
+      console.error('ProviderManager generateContent error:', error);
+      return {
+        success: false,
+        error: error.message,
+        provider: providerName || this.defaultProvider
+      };
+    }
   }
 
   /**

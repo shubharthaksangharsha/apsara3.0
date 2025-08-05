@@ -7,6 +7,7 @@ A production-ready AI conversation platform with multi-provider support, advance
 ### AI & Provider Integration
 - ✅ **Multi-Provider Architecture** with Google Gemini (extensible for Claude, GPT, etc.)
 - ✅ **Advanced Thinking Models** with Gemini 2.5 series support
+- ✅ **Internal Streaming Architecture** - All AI operations use streaming for optimal performance
 - ✅ **Flexible Model Selection** per conversation and message
 - ✅ **Automatic Conversation History** included in all AI interactions
 - ✅ **Message Editing & Regeneration** with conversation branching
@@ -64,6 +65,7 @@ A production-ready AI conversation platform with multi-provider support, advance
 - ✅ **Expiry Management** for temporary files
 
 ## 🚀 Latest Performance & Workflow Improvements
+- ✅ **Internal Streaming Architecture** - All AI operations now use Google's streaming API internally
 - ✅ **Fixed Password Reset Flow** with proper OTP verification sequence
 - ✅ **Enhanced async plugin support** with full database integration and AI responses
 - ✅ **Automatic conversation context** in all AI interactions
@@ -72,6 +74,84 @@ A production-ready AI conversation platform with multi-provider support, advance
 - ✅ **Removed response endpoint** (streamlined plugin architecture)
 - ✅ **User-specific analytics** with secure access control
 - ✅ **Enhanced CLI management** with logout and advanced features
+
+## 🔄 Backend Streaming Architecture
+
+### How Internal Streaming Works
+
+All AI operations in Apsara now use **Google's streaming API internally** while maintaining the same REST API interface. Here's how it works:
+
+#### 1. **Stream Processing Flow**
+```
+Client Request → AI Routes → ProviderManager → GoogleProvider → Google Streaming API
+     ↓
+Chunks Accumulated → Complete Response → Client Response
+```
+
+#### 2. **Streaming Chunk Processing**
+```bash
+# Server logs show the streaming process:
+🧠 Thought summary found: "AI thinking process..."  # Processing AI thoughts
+🔍 Direct text found: "Hello there! Welcome..."     # Processing text content
+📤 Yielding chunk - Model: gemini-2.5-flash        # Streaming chunk yielded
+✅ Final Response - Generated Text: "Complete..."   # Accumulated final response
+```
+
+#### 3. **Chunk Types Processed**
+- **🧠 Thought Chunks**: AI reasoning and thinking processes
+- **📝 Text Chunks**: Main response content
+- **📊 Metadata Chunks**: Usage statistics, token counts, finish reasons
+- **🔐 Signature Chunks**: Function calling signatures
+
+#### 4. **Benefits of Internal Streaming**
+
+| Feature | Before | After (Streaming) |
+|---------|--------|------------------|
+| **Response Time** | Wait for complete generation | ⚡ Faster, chunk-by-chunk processing |
+| **AI Thinking** | Limited thinking support | 🧠 Full thinking process captured |
+| **Memory Usage** | High memory for large responses | 📈 Optimized memory usage |
+| **API Compatibility** | REST only | 🔄 REST + ready for real-time streaming |
+
+#### 5. **Technical Implementation**
+
+The `ProviderManager.generateContent()` method now:
+
+```javascript
+// Uses streaming internally but returns complete response
+async generateContent(params) {
+  // Stream chunks and accumulate
+  for await (const chunk of provider.generateContentStream(params)) {
+    fullText += chunk.text;
+    fullThoughts += chunk.thought;
+    // ... accumulate metadata
+  }
+  
+  // Return complete response (same API interface)
+  return { text: fullText, thoughts: fullThoughts, ... };
+}
+```
+
+#### 6. **Where Streaming is Used**
+
+All these operations now use streaming internally:
+- ✅ **Text Generation** (`/api/ai/generate`)
+- ✅ **Message Editing** (`/api/ai/edit-message`) 
+- ✅ **Response Regeneration** (`/api/ai/regenerate`)
+- ✅ **File Analysis** (multimodal AI processing)
+- ✅ **Plugin AI Integration** (when `sendToModel: true`)
+
+#### 7. **No Breaking Changes**
+
+- 🔄 **Same API Interface**: All endpoints work exactly as before
+- 📱 **Client Compatibility**: No changes needed in frontend applications
+- 🛠️ **CLI Compatibility**: `manage-conversations.js` works unchanged
+- 📊 **Response Format**: Same JSON response structure maintained
+
+#### 8. **Plugin Regeneration Support**
+
+- ✅ **Fixed Plugin Regeneration**: Can now regenerate AI responses after plugin executions
+- 🔧 **Tool Message Support**: Regenerate endpoint now accepts both 'user' and 'tool' messages
+- 🤖 **Intelligent Context**: Tool results are properly formatted for AI understanding during regeneration
 
 ## 📊 API Endpoints
 
