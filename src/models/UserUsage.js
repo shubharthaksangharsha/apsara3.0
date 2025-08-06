@@ -163,8 +163,17 @@ userUsageSchema.methods.resetDailyUsage = function() {
     }
   });
 
-  // Reset daily counters
+  // Reset daily counters - Initialize objects if they don't exist
   this.dailyUsage.date = today;
+  
+  // Ensure the model objects exist before setting count
+  if (!this.dailyUsage['gemini-2.5-flash']) {
+    this.dailyUsage['gemini-2.5-flash'] = { count: 0, limit: 20 };
+  }
+  if (!this.dailyUsage['gemini-2.5-pro']) {
+    this.dailyUsage['gemini-2.5-pro'] = { count: 0, limit: 5 };
+  }
+  
   this.dailyUsage['gemini-2.5-flash'].count = 0;
   this.dailyUsage['gemini-2.5-pro'].count = 0;
 
