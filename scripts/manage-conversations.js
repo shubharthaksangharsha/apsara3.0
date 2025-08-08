@@ -1619,28 +1619,71 @@ class ConversationManager {
         return;
       }
 
-      console.log('\n📦 Storage Method:');
-      console.log('==================');
-      console.log('1. Local Storage (permanent, stored on server)');
-      console.log('2. Google File API (48h expiry, optimized for AI processing)');
+      console.log('\n📦 Upload Method:');
+      console.log('=================');
+      console.log('1. Smart Upload (Recommended - Automatic storage selection)');
+      console.log('2. Manual Storage Selection');
       console.log('');
 
-      const storageChoice = await this.question('Choose storage method (1-2): ');
-      let storageMethod;
+      const uploadChoice = await this.question('Choose upload method (1-2, default: 1): ') || '1';
+      let useSmartUpload = true;
+      let storageMethod = 'auto';
+      let preference = 'processing';
 
-      switch (storageChoice) {
-        case '1':
-          storageMethod = 'local';
-          break;
-        case '2':
-          storageMethod = 'google-file-api';
-          break;
-        default:
-          console.log('❌ Invalid choice. Using Google File API as default.');
-          storageMethod = 'google-file-api';
+      if (uploadChoice === '2') {
+        useSmartUpload = false;
+        console.log('\n📦 Manual Storage Method:');
+        console.log('==========================');
+        console.log('1. Local Storage (permanent, stored on server)');
+        console.log('2. Google File API (48h expiry, optimized for AI processing)');
+        console.log('3. Auto-detect (intelligent selection)');
+        console.log('');
+
+        const storageChoice = await this.question('Choose storage method (1-3): ');
+        switch (storageChoice) {
+          case '1':
+            storageMethod = 'local';
+            break;
+          case '2':
+            storageMethod = 'google-file-api';
+            break;
+          case '3':
+            storageMethod = 'auto';
+            break;
+          default:
+            console.log('❌ Invalid choice. Using auto-detect.');
+            storageMethod = 'auto';
+        }
+      } else {
+        console.log('\n🧠 Smart Upload Preference:');
+        console.log('============================');
+        console.log('1. Processing (Optimize for AI processing)');
+        console.log('2. Speed (Optimize for upload/access speed)');
+        console.log('3. Storage (Optimize for long-term storage)');
+        console.log('');
+
+        const prefChoice = await this.question('Choose preference (1-3, default: 1): ') || '1';
+        switch (prefChoice) {
+          case '1':
+            preference = 'processing';
+            break;
+          case '2':
+            preference = 'speed';
+            break;
+          case '3':
+            preference = 'storage';
+            break;
+          default:
+            preference = 'processing';
+        }
       }
 
-      console.log(`\n📤 Uploading file to ${storageMethod}...`);
+      console.log(`\n📤 Uploading file using ${useSmartUpload ? 'smart upload' : 'manual method'}...`);
+      if (useSmartUpload) {
+        console.log(`🎯 Preference: ${preference}`);
+      } else {
+        console.log(`📦 Storage method: ${storageMethod}`);
+      }
 
       // Create form data for file upload
       const formData = new FormData();
@@ -1657,13 +1700,26 @@ class ConversationManager {
       const file = new File([fileBuffer], fileName, { type: mimeType });
       
       formData.append('files', file);
-      formData.append('storageMethod', storageMethod);
       formData.append('userId', this.currentUser._id.toString());
       formData.append('conversationId', this.currentConversation.conversationId);
       formData.append('displayName', fileName);
 
+      if (useSmartUpload) {
+        // Use smart upload endpoint
+        formData.append('aiProvider', 'google');
+        formData.append('preference', preference);
+        
+        var uploadEndpoint = 'http://localhost:5000/api/files/smart-upload';
+      } else {
+        // Use manual upload endpoint
+        formData.append('storageMethod', storageMethod);
+        formData.append('aiProvider', 'google');
+        
+        var uploadEndpoint = 'http://localhost:5000/api/files/upload';
+      }
+
       // Upload file
-      const uploadResponse = await fetch('http://localhost:5000/api/files/upload', {
+      const uploadResponse = await fetch(uploadEndpoint, {
         method: 'POST',
         body: formData
       });
@@ -1696,6 +1752,22 @@ class ConversationManager {
       console.log(`🌐 URL: ${uploadedFile.url}`);
       if (uploadedFile.expiresAt) {
         console.log(`⏰ Expires: ${new Date(uploadedFile.expiresAt).toLocaleString()}`);
+      }
+
+      // Show smart upload decision info if available
+      if (uploadResult.decision) {
+        console.log('\n🧠 Smart Upload Decision:');
+        console.log(`📊 Reason: ${uploadResult.decision.reason}`);
+        if (uploadResult.decision.metrics) {
+          const metrics = uploadResult.decision.metrics;
+          console.log(`📈 Metrics: Total: ${(metrics.totalSize/1024/1024).toFixed(1)}MB, Files: ${metrics.fileCount}, Max: ${(metrics.maxFileSize/1024/1024).toFixed(1)}MB`);
+        }
+        if (uploadResult.decision.aiProvider) {
+          console.log(`🤖 AI Provider: ${uploadResult.decision.aiProvider}`);
+        }
+        if (uploadResult.intelligentUpload) {
+          console.log('🎯 Used intelligent upload system');
+        }
       }
 
       // Ask user what they want to know about the file

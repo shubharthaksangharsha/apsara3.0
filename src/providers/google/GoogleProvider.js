@@ -343,6 +343,33 @@ export class GoogleProvider extends BaseProvider {
     }
   }
 
+  /**
+   * Count tokens for given content
+   */
+  async countTokens(params) {
+    this.validateInitialization();
+
+    const { model = 'gemini-2.5-flash', contents } = params;
+
+    try {
+      const response = await this.client.models.countTokens({
+        model,
+        contents: this.normalizeContent(contents)
+      });
+
+      return {
+        success: true,
+        provider: this.name,
+        model,
+        totalTokens: response.totalTokens,
+        response
+      };
+    } catch (error) {
+      console.error('Google Count Tokens Error:', error);
+      throw this.createProviderError(error);
+    }
+  }
+
 
 
   /**

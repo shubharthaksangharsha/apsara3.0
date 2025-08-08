@@ -332,6 +332,24 @@ export class ProviderManager {
   }
 
   /**
+   * Count tokens for given content
+   * @param {Object} params - Token counting parameters
+   * @param {string} params.provider - Provider name (optional)
+   * @returns {Promise<Object>} Token count result
+   */
+  async countTokens(params) {
+    const { provider: providerName, ...restParams } = params;
+    const provider = this.getProvider(providerName);
+    
+    // Check if provider supports token counting
+    if (typeof provider.countTokens !== 'function') {
+      throw new Error(`Provider '${provider.name}' does not support token counting`);
+    }
+    
+    return await provider.countTokens(restParams);
+  }
+
+  /**
    * Get provider statistics
    * @returns {Object} Provider statistics
    */

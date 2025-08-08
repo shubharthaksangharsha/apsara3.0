@@ -307,6 +307,11 @@ router.post('/generate', asyncHandler(async (req, res) => {
         timing: {
           requestTime: new Date()
         },
+        tokens: {
+          input: 0, // Will be updated after AI response
+          output: 0,
+          total: 0
+        },
         provider: {
           name: provider,
           model
@@ -365,27 +370,23 @@ router.post('/generate', asyncHandler(async (req, res) => {
                   mimeType: file.mimeType
                 };
               } else if (file.storage.provider === 'local' && file.storage.path) {
-                // Automatically upload local file to Google File API for AI processing
-                console.log(`🔄 Uploading local file to Google File API for AI processing: ${fileIdOrUri}`);
+                // Use inline base64 data for local files (more efficient for files <20MB)
+                console.log(`📄 Processing local file as inline data for AI: ${fileIdOrUri}`);
                 try {
-                  const uploadResult = await ProviderManager.uploadFile({
-                    provider: 'google',
-                    file: file.storage.path,
-                    config: {
-                      mimeType: file.mimeType,
-                      displayName: `temp_${file.originalName}`,
-                      description: 'Temporary upload for AI processing'
-                    }
-                  });
-
+                  const fs = await import('fs');
+                  const fileBuffer = await fs.promises.readFile(file.storage.path);
+                  const base64Data = fileBuffer.toString('base64');
+                  
                   fileData = {
-                    fileUri: uploadResult.uri,
-                    mimeType: file.mimeType
+                    inlineData: {
+                      mimeType: file.mimeType,
+                      data: base64Data
+                    }
                   };
 
-                  console.log(`✅ Local file temporarily uploaded to Google File API: ${uploadResult.name}`);
-                } catch (uploadError) {
-                  console.error(`❌ Failed to upload local file to Google File API: ${uploadError.message}`);
+                  console.log(`✅ Local file processed as inline data (${(fileBuffer.length / 1024 / 1024).toFixed(2)}MB)`);
+                } catch (readError) {
+                  console.error(`❌ Failed to read local file: ${readError.message}`);
                   continue;
                 }
               } else if (file.storage.provider === 's3' && file.storage.url) {
@@ -397,9 +398,19 @@ router.post('/generate', asyncHandler(async (req, res) => {
           }
           
           if (fileData) {
-            messageParts.push({
-              fileData: fileData
-            });
+            // Add fileData directly based on its type
+            if (fileData.inlineData) {
+              // For inline base64 data
+              messageParts.push(fileData);
+            } else if (fileData.fileUri) {
+              // For Google File API URIs
+              messageParts.push({
+                fileData: {
+                  fileUri: fileData.fileUri,
+                  mimeType: fileData.mimeType
+                }
+              });
+            }
           }
         } catch (error) {
           console.error(`Error processing file ${fileIdOrUri}:`, error);
@@ -496,6 +507,14 @@ router.post('/generate', asyncHandler(async (req, res) => {
     });
 
     await modelMessage.save();
+
+    // Update user message with token information from AI response
+    userMessage.metadata.tokens = {
+      input: aiResponse.usageMetadata?.promptTokenCount || 0,
+      output: 0, // User messages don't generate output
+      total: aiResponse.usageMetadata?.promptTokenCount || 0
+    };
+    await userMessage.save();
 
     // Record usage for rate limiting
     await userUsage.recordUsage(model, aiResponse.usageMetadata?.totalTokenCount || 0);
@@ -1263,6 +1282,56 @@ router.post('/regenerate', asyncHandler(async (req, res) => {
       success: false,
       error: 'Internal server error',
       details: error.message
+    });
+  }
+}));
+
+/**
+ * @route POST /api/ai/tokens
+ * @desc Count tokens for given content
+ * @access Public
+ */
+router.post('/tokens', asyncHandler(async (req, res) => {
+  const tokenCountSchema = Joi.object({
+    contents: Joi.alternatives().try(
+      Joi.string(),
+      Joi.array().items(Joi.string()),
+      Joi.object()
+    ).required(),
+    model: Joi.string().default('gemini-2.5-flash'),
+    provider: Joi.string().default('google')
+  });
+
+  const { error, value } = tokenCountSchema.validate(req.body);
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      error: { message: error.details[0].message }
+    });
+  }
+
+  const { contents, model, provider } = value;
+
+  try {
+    // Use ProviderManager to count tokens
+    const result = await ProviderManager.countTokens({
+      contents,
+      model,
+      provider
+    });
+
+    res.json({
+      success: true,
+      provider,
+      model,
+      tokenCount: result.totalTokens || result.tokenCount,
+      details: result
+    });
+  } catch (error) {
+    console.error('Token Count Error:', error);
+    res.status(500).json({
+      success: false,
+      error: { message: error.message }
     });
   }
 }));

@@ -1,68 +1,41 @@
 # Apsara AI Backend
 
-A production-ready AI conversation platform with multi-provider support, advanced rate limiting, comprehensive authentication, and powerful plugin system.
+A production-ready AI conversation platform with multi-provider support, intelligent file management, and comprehensive authentication.
 
-## 🌟 Key Features
+## ✨ Key Features
 
-### AI & Provider Integration
-- ✅ **Multi-Provider Architecture** with Google Gemini (extensible for Claude, GPT, etc.)
-- ✅ **Advanced Thinking Models** with Gemini 2.5 series support
-- ✅ **Internal Streaming Architecture** - All AI operations use streaming for optimal performance
-- ✅ **Flexible Model Selection** per conversation and message
-- ✅ **Automatic Conversation History** included in all AI interactions
-- ✅ **Message Editing & Regeneration** with conversation branching
-- ✅ **Enhanced Response Metadata** (tokens, timing, model info, thoughts)
+### 🤖 AI Integration
+- **Multi-Provider Support**: Google Gemini (extensible for Claude, GPT, xAI)
+- **Streaming Architecture**: Internal streaming for optimal performance
+- **Thinking Models**: Advanced reasoning with Gemini 2.5 series
+- **Conversation History**: Automatic context management
+- **Message Editing**: Edit and regenerate responses
 
-### Authentication & User Management
-- ✅ **Multiple Authentication Methods**:
-  - Traditional registration with OTP verification
-  - **Google OAuth integration** with account linking
-  - **Guest login** with 5-message trial access
-  - **Secure password reset** with two-step OTP verification
-- ✅ **Role-based Access Control** (user, admin, guest)
-- ✅ **Session Management** with JWT tokens and logout functionality
+### 🔐 Authentication & Security
+- **Multiple Auth Methods**: Email/password, Google OAuth, guest login
+- **Role-Based Access**: User, admin, guest roles
+- **Rate Limiting**: Subscription-based usage control
+- **JWT Security**: Secure token-based authentication
 
-### Rate Limiting & Usage Control
-- ✅ **Intelligent Rate Limiting System**:
-  - **Guest**: 5 total messages (gemini-2.5-flash only)
-  - **Free**: 20/day gemini-2.5-flash, 5/day gemini-2.5-pro
-  - **Premium**: 100/day gemini-2.5-flash, 50/day gemini-2.5-pro
-- ✅ **Usage Tracking & Analytics** with detailed statistics
-- ✅ **Automatic Daily Reset** at midnight UTC
-- ✅ **Real-time Usage Monitoring** with remaining limits in responses
+### 📁 Smart File Management
+- **Intelligent Upload**: Auto-selects optimal storage based on file size/count
+- **Multi-Storage Support**: Local, S3, Google File API
+- **AI Processing**: Seamless multimodal file analysis
+- **Storage Preferences**: Speed, processing, or storage optimization
 
-### Plugin System
-- ✅ **Provider-based Plugin Architecture** (`/api/plugins/{provider}/{plugin}/send`)
-- ✅ **Synchronous & Asynchronous Execution** with `runAsync` parameter
-- ✅ **AI Integration** with `sendToModel` for intelligent analysis
-- ✅ **Built-in Plugins**: Calculator and Echo tools
-- ✅ **Database Integration** for full conversation persistence
+### 🎯 Rate Limiting System
 
-### Management Tools
-- ✅ **Enhanced CLI** with 19 comprehensive options
-- ✅ **User-specific Analytics** with password verification for security
-- ✅ **Conversation Management** with bulk and selective deletion
-- ✅ **Message editing** from CLI interface
-- ✅ **Simplified plugin execution** with async support
-- ✅ **Database Statistics** and monitoring tools
+| Plan | gemini-2.5-flash | gemini-2.5-pro | Features |
+|------|------------------|------------------|----------|
+| **Guest** | 5 total messages | ❌ No access | Trial access |
+| **Free** | 20/day | 5/day | Full features |
+| **Premium** | 100/day | 50/day | Priority support |
 
-### Data Management
-- ✅ **Conversation Persistence** with message sequencing
-- ✅ **Incremental Message IDs** for ordered history retrieval
-- ✅ **Comprehensive Metadata** storage (timing, tokens, config)
-- ✅ **Usage History Tracking** with reset logs
-- ✅ **Guest Session Management** with temporary accounts
-
-### File Management System
-- ✅ **Multi-Storage Architecture** with three upload methods:
-  - **Local Storage**: Files stored in upload folder (permanent, auto-uploaded to Google for AI processing)
-  - **S3 Storage**: Files stored in AWS S3 bucket (scalable, production-ready)
-  - **Google File API**: Direct upload to Google (48h expiry, AI processing optimized)
-- ✅ **Files Array Support** in AI generation with `files=[]` parameter
-- ✅ **Automatic File Handling** with seamless multimodal AI support
-- ✅ **Smart File Processing**: Local files automatically uploaded to Google File API for AI analysis
-- ✅ **File Type Detection** and validation
-- ✅ **Expiry Management** for temporary files
+### 🔌 Plugin System
+- **Provider-based Architecture**: `/api/plugins/{provider}/{plugin}/send`
+- **Sync/Async Execution**: Background processing support
+- **AI Integration**: Intelligent plugin result analysis
+- **Built-in Tools**: Calculator, Echo plugins
 
 ## 🚀 Latest Performance & Workflow Improvements
 - ✅ **Internal Streaming Architecture** - All AI operations now use Google's streaming API internally
