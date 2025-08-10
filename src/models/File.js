@@ -14,8 +14,7 @@ const fileSchema = new mongoose.Schema({
   },
   conversationId: {
     type: String,
-    required: false,
-    index: true
+    required: false
   },
   originalName: {
     type: String,

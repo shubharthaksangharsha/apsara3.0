@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fetch from 'node-fetch';
 import { FormData, File } from 'formdata-node';
+import { v4 as uuidv4 } from 'uuid';
 
 // Load environment variables
 const __filename = fileURLToPath(import.meta.url);
@@ -2186,6 +2187,359 @@ class ConversationManager {
       console.error('❌ Error during user selection:', error.message);
     }
   }
+
+  // Live API options removed
+  /* async testLiveAPIIntegration() {
+    console.log('\n🧪 Live API Integration & Test');
+    console.log('==============================');
+    
+    if (!this.currentUser) {
+      console.log('❌ Please login first to test Live API integration.');
+      return;
+    }
+
+    if (!this.currentConversation) {
+      console.log('❌ Please select a conversation first to test Live API integration.');
+      return;
+    }
+
+    // First show integration status
+    await this.showLiveAPIIntegrationStatus();
+    
+    // Then offer interactive test
+    console.log('\n🎯 Live API Test Options:');
+    console.log('=========================');
+    console.log('1. View integration status only');
+    console.log('2. Interactive Live API Test (Text/Audio)');
+    console.log('3. Back to main menu');
+    console.log('');
+
+    const testChoice = await this.question('Choose test option (1-3, default: 1): ') || '1';
+    
+    if (testChoice === '2') {
+      await this.interactiveLiveAPITest();
+    } else if (testChoice === '1') {
+      console.log('✅ Integration status displayed above.');
+    } else {
+      console.log('🔙 Returning to main menu...');
+    }
+  } */
+
+  /* async showLiveAPIIntegrationStatus() {
+    try {
+      console.log('🔧 Testing Live API Integration...');
+      console.log(`👤 User: ${this.currentUser.fullName}`);
+      console.log(`💬 Conversation: ${this.currentConversation.title}`);
+      console.log(`🆔 Conversation ID: ${this.currentConversation.conversationId}`);
+      
+      // Import LiveConversationService for testing
+      const { default: LiveConversationService } = await import('../src/services/LiveConversationService.js');
+      
+      console.log('✅ LiveConversationService imported successfully');
+      
+      // Test getting conversation context summary
+      const contextSummary = await LiveConversationService.getConversationContextSummary(
+        this.currentConversation.conversationId
+      );
+      
+      console.log('\n📊 Conversation Context Summary:');
+      console.log(`   Title: ${contextSummary.title}`);
+      console.log(`   Type: ${contextSummary.type}`);
+      console.log(`   Total Messages: ${contextSummary.totalMessages}`);
+      console.log(`   Live Active: ${contextSummary.isLiveActive}`);
+      console.log(`   Live Session ID: ${contextSummary.liveSessionId || 'None'}`);
+      
+      if (contextSummary.messageBreakdown.length > 0) {
+        console.log('\n📈 Message Breakdown:');
+        contextSummary.messageBreakdown.forEach(breakdown => {
+          console.log(`   ${breakdown._id}: ${breakdown.count} messages`);
+        });
+      }
+      
+      console.log('\n🎯 Integration Status:');
+      console.log('✅ Database models support Live API');
+      console.log('✅ LiveConversationService working');
+      console.log('✅ Conversation context can be retrieved');
+      console.log('✅ Ready for Live API WebSocket integration');
+      
+    } catch (error) {
+      console.log('❌ Live API Integration Test Failed:');
+      console.log(`   Error: ${error.message}`);
+      console.log('\n🔧 Troubleshooting:');
+      console.log('1. Ensure MongoDB is running');
+      console.log('2. Check if LiveConversationService was created');
+      console.log('3. Verify conversation exists in database');
+    }
+  } */
+
+  /* async interactiveLiveAPITest() {
+    console.log('\n🎙️ Interactive Live API Test');
+    console.log('============================');
+    
+    try {
+      // Live API Configuration
+      console.log('\n⚙️ Live API Configuration:');
+      console.log('==========================');
+      
+      const model = await this.question('Enter Live model (default: gemini-2.0-flash-live-001): ') || 'gemini-2.0-flash-live-001';
+      
+      console.log('\n📡 Response Modalities:');
+      console.log('1. TEXT only');
+      console.log('2. AUDIO only'); 
+      console.log('3. TEXT + AUDIO (default)');
+      const modalityChoice = await this.question('Choose modality (1-3, default: 3): ') || '3';
+      
+      let responseModalities = ['TEXT', 'AUDIO'];
+      switch (modalityChoice) {
+        case '1':
+          responseModalities = ['TEXT'];
+          break;
+        case '2':
+          responseModalities = ['AUDIO'];
+          break;
+        case '3':
+          responseModalities = ['TEXT', 'AUDIO'];
+          break;
+      }
+      
+      console.log('\n🎥 Media Resolution:');
+      console.log('1. LOW');
+      console.log('2. MEDIUM (default)');
+      console.log('3. HIGH');
+      const resolutionChoice = await this.question('Choose resolution (1-3, default: 2): ') || '2';
+      
+      let mediaResolution = 'MEDIUM';
+      switch (resolutionChoice) {
+        case '1':
+          mediaResolution = 'LOW';
+          break;
+        case '2':
+          mediaResolution = 'MEDIUM';
+          break;
+        case '3':
+          mediaResolution = 'HIGH';
+          break;
+      }
+      
+      let voiceConfig = null;
+      if (responseModalities.includes('AUDIO')) {
+        console.log('\n🎤 Voice Configuration:');
+        console.log('1. Default voice');
+        console.log('2. Custom voice settings');
+        const voiceChoice = await this.question('Choose voice (1-2, default: 1): ') || '1';
+        
+        if (voiceChoice === '2') {
+          const voiceName = await this.question('Enter voice name (default: auto): ') || 'auto';
+          const voiceLanguage = await this.question('Enter voice language (default: en-US): ') || 'en-US';
+          voiceConfig = {
+            voiceName,
+            languageCode: voiceLanguage
+          };
+        }
+      }
+      
+      console.log('\n🔗 Load Conversation Context:');
+      const loadContext = await this.question('Load previous messages into Live session? (y/n, default: y): ') || 'y';
+      
+      // Display configuration summary
+      console.log('\n📋 Configuration Summary:');
+      console.log('========================');
+      console.log(`🤖 Model: ${model}`);
+      console.log(`📡 Response Modalities: ${responseModalities.join(', ')}`);
+      console.log(`🎥 Media Resolution: ${mediaResolution}`);
+      if (voiceConfig) {
+        console.log(`🎤 Voice: ${voiceConfig.voiceName} (${voiceConfig.languageCode})`);
+      }
+      console.log(`🔗 Load Context: ${loadContext === 'y' ? 'Yes' : 'No'}`);
+      console.log(`👤 User ID: ${this.currentUser._id.toString()}`);
+      console.log(`💬 Conversation ID: ${this.currentConversation.conversationId}`);
+      
+      console.log('\n💡 WebSocket Connection Details:');
+      console.log('================================');
+      console.log('WebSocket URL: ws://localhost:5000/live');
+      console.log('Create Session Message:');
+      
+      const sessionConfig = {
+        type: 'create_session',
+        data: {
+          conversationId: this.currentConversation.conversationId,
+          userId: this.currentUser._id.toString(),
+          model,
+          config: {
+            responseModalities,
+            mediaResolution,
+            ...(voiceConfig && { speechConfig: { voiceConfig } })
+          },
+          loadConversationContext: loadContext === 'y'
+        }
+      };
+      
+      console.log(JSON.stringify(sessionConfig, null, 2));
+      
+      console.log('\n🎯 Test Interaction:');
+      console.log('====================');
+      
+      if (responseModalities.includes('TEXT')) {
+        console.log('📝 TEXT Mode Available:');
+        console.log('   • User can type messages');
+        console.log('   • AI responds with text');
+        console.log('   • Messages saved to conversation');
+      }
+      
+      if (responseModalities.includes('AUDIO')) {
+        console.log('🎤 AUDIO Mode Available:');
+        console.log('   • User can speak (recorded as audio)');
+        console.log('   • AI responds with voice');
+        console.log('   • Audio files saved to uploads/audio/');
+        console.log('   • Transcriptions saved to conversation');
+      }
+      
+      console.log('\n🧪 Simulated Test Messages:');
+      console.log('============================');
+      
+      // Simulate text message
+      console.log('\n1️⃣ TEXT MESSAGE SIMULATION:');
+      const textMessage = await this.question('Enter a test message to send: ') || 'Hello, this is a test message from the CLI.';
+      
+      console.log(`\n📤 Sending: "${textMessage}"`);
+      console.log('WebSocket Message:');
+      console.log(JSON.stringify({
+        type: 'send_message',
+        sessionId: 'session_123_placeholder',
+        data: {
+          text: textMessage,
+          turnComplete: true
+        }
+      }, null, 2));
+      
+      console.log('\n📥 Expected Response:');
+      console.log('• AI processes the message with conversation context');
+      console.log('• Response saved to conversation with messageType: "live"');
+      console.log('• User and AI messages appear in conversation history');
+      
+      if (responseModalities.includes('AUDIO')) {
+        console.log('\n2️⃣ AUDIO MESSAGE SIMULATION:');
+        console.log('🎤 Recording simulation: [User speaks into microphone]');
+        console.log('🔊 Sample audio message: "Can you help me with my project?"');
+        
+        console.log('\n📤 Audio Processing:');
+        console.log('• Audio recorded and saved to uploads/audio/audio_timestamp_id.wav');
+        console.log('• Audio transcribed: "Can you help me with my project?"');
+        console.log('• Message sent to Live API with audio data');
+        
+        console.log('\n📥 Expected Audio Response:');
+        console.log('• AI responds with voice audio');
+        console.log('• Audio response saved to uploads/audio/');
+        console.log('• Transcription saved to conversation');
+        console.log('• Audio playback available via file URL');
+      }
+      
+      console.log('\n✅ Test Configuration Complete!');
+      console.log('===============================');
+      console.log('🔄 To test with real WebSocket:');
+      console.log('1. Use the session configuration above');
+      console.log('2. Connect to ws://localhost:5000/live');
+      console.log('3. Send create_session message');
+      console.log('4. Send text/audio messages');
+      console.log('5. Check conversation in CLI (option 4)');
+      
+    } catch (error) {
+      console.log('❌ Interactive test failed:', error.message);
+    }
+  } */
+
+  /* async testLiveAPIWithConversation() {
+    console.log('\n🔗 Test Live API with Existing Conversation');
+    console.log('==========================================');
+    
+    if (!this.currentUser) {
+      console.log('❌ Please login first.');
+      return;
+    }
+
+    // Show available conversations
+    const conversations = await Conversation.find({ 
+      userId: this.currentUser._id.toString() 
+    }).sort({ updatedAt: -1 }).limit(10);
+
+    if (conversations.length === 0) {
+      console.log('❌ No conversations found. Create a conversation first.');
+      return;
+    }
+
+    console.log('\n📝 Available Conversations:');
+    conversations.forEach((conv, index) => {
+      const type = conv.type === 'live' ? '🎙️ Live' : '💬 REST';
+      const lastMsg = conv.updatedAt.toLocaleString();
+      console.log(`${index + 1}. ${type} ${conv.title} (${lastMsg})`);
+    });
+
+    const choice = await this.question(`\nSelect conversation (1-${conversations.length}): `);
+    const selectedConv = conversations[parseInt(choice) - 1];
+
+    if (!selectedConv) {
+      console.log('❌ Invalid selection.');
+      return;
+    }
+
+    console.log(`\n✅ Selected: ${selectedConv.title} (${selectedConv.type})`);
+    console.log(`📋 Conversation ID: ${selectedConv.conversationId}`);
+    console.log(`👤 User ID: ${this.currentUser._id.toString()}`);
+    
+    console.log('\n🎯 Next Steps:');
+    console.log('1. Run: npm run test:live-api');
+    console.log('2. Choose option 1 (Configure Live API Session)');
+    console.log(`3. Use Conversation ID: ${selectedConv.conversationId}`);
+    console.log(`4. Use User ID: ${this.currentUser._id.toString()}`);
+    console.log('5. Enable "Load conversation context" option');
+  } */
+
+  /* async createNewLiveConversation() {
+    console.log('\n📝 Create New Live Conversation');
+    console.log('==============================');
+    
+    if (!this.currentUser) {
+      console.log('❌ Please login first.');
+      return;
+    }
+
+    const title = await this.question('Enter conversation title (optional): ') || `Live Chat ${new Date().toLocaleDateString()}`;
+    
+    const conversation = new Conversation({
+      conversationId: uuidv4(),
+      userId: this.currentUser._id.toString(),
+      title,
+      type: 'live',
+      live: {
+        isActive: false,
+        config: {
+          model: 'gemini-2.0-flash-live-001',
+          responseModalities: ['TEXT'],
+          mediaResolution: 'MEDIUM'
+        }
+      },
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    await conversation.save();
+    
+    console.log('\n✅ Live conversation created successfully!');
+    console.log(`📋 Conversation ID: ${conversation.conversationId}`);
+    console.log(`📝 Title: ${conversation.title}`);
+    console.log(`👤 User ID: ${this.currentUser._id.toString()}`);
+    
+    console.log('\n🎯 Next Steps:');
+    console.log('1. Run: npm run test:live-api');
+    console.log('2. Choose option 1 (Configure Live API Session)');
+    console.log(`3. Use Conversation ID: ${conversation.conversationId}`);
+    console.log(`4. Use User ID: ${this.currentUser._id.toString()}`);
+    console.log('5. Start your Live API session!');
+
+    // Set as current conversation
+    this.currentConversation = conversation;
+    console.log(`\n✅ Set as current conversation for CLI.`);
+  } */
 
   async run() {
     console.log('🚀 Starting Apsara Conversation Manager...');

@@ -180,7 +180,7 @@ conversationSchema.methods.endLiveSession = function() {
 };
 
 conversationSchema.methods.canTransitionToLive = function() {
-  return this.type === 'rest' || this.type === 'hybrid';
+  return this.type === 'rest' || this.type === 'hybrid' || this.type === 'live';
 };
 
 conversationSchema.methods.canTransitionToRest = function() {

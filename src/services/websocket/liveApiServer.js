@@ -2,6 +2,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { liveApiRateLimiter } from '../../middleware/rateLimiter.js';
 import ProviderManager from '../../providers/ProviderManager.js';
 import { SessionManager } from './SessionManager.js';
+import LiveConversationService from '../LiveConversationService.js';
+import AudioStorageService from '../AudioStorageService.js';
+import { Conversation } from '../../models/index.js';
+import ConversationService from '../database/ConversationService.js';
 
 /**
  * Live API WebSocket Server
@@ -11,6 +15,26 @@ export class LiveApiServer {
   constructor() {
     this.clients = new Map();
     this.sessionManager = new SessionManager();
+    this.audioStorage = new AudioStorageService();
+    this.initialized = false;
+  }
+
+  /**
+   * Initialize the Live API server
+   */
+  async initialize() {
+    if (this.initialized) return;
+    
+    try {
+      // Initialize audio storage
+      await this.audioStorage.initialize();
+      console.log('✅ Audio storage initialized for Live API');
+      
+      this.initialized = true;
+    } catch (error) {
+      console.error('❌ Failed to initialize Live API server:', error);
+      throw error;
+    }
   }
 
   /**
@@ -278,42 +302,66 @@ export class LiveApiServer {
         provider = 'google',
         config = {},
         sessionId = uuidv4(),
-        resumeHandle = null
+        resumeHandle = null,
+        conversationId = null,
+        userId = null,
+        loadConversationContext = true
       } = message.data || {};
+
+      console.log('🔍 Session creation parameters:');
+      console.log('  conversationId:', conversationId, 'type:', typeof conversationId);
+      console.log('  userId:', userId, 'type:', typeof userId);
+      console.log('  loadConversationContext:', loadConversationContext);
 
       const client = this.clients.get(clientId);
       
       // Check session limits
-      if (client.sessions.size >= parseInt(process.env.MAX_SESSIONS_PER_USER) || 5) {
-        return this.sendError(clientId, 'Maximum number of sessions reached');
+      const maxSessions = parseInt(process.env.MAX_SESSIONS_PER_USER) || 5;
+      if (client.sessions.size >= maxSessions) {
+        return this.sendError(clientId, `Maximum number of sessions reached (${maxSessions})`);
       }
 
+      // Use client-generated sessionId since Gemini Live might return N/A
+      const finalSessionId = sessionId; // Always use our client-generated ID
+      
       // Create live session with provider
       const sessionCallbacks = {
         onopen: () => {
           this.sendToClient(clientId, {
             type: 'session_opened',
-            sessionId,
+            sessionId: finalSessionId,
             timestamp: new Date().toISOString()
           });
         },
         
-        onmessage: (response) => {
+        onmessage: async (response) => {
           // Handle session resumption updates
           if (response.sessionResumptionUpdate) {
             this.sendToClient(clientId, {
               type: 'session_resumption_update',
-              sessionId,
+              sessionId: finalSessionId,
               data: response.sessionResumptionUpdate,
               timestamp: new Date().toISOString()
             });
+
+            // Update resumption handle in conversation
+            if (conversationId && response.sessionResumptionUpdate.newHandle) {
+              try {
+                await LiveConversationService.handleSessionResumption(
+                  conversationId,
+                  response.sessionResumptionUpdate.newHandle
+                );
+              } catch (error) {
+                console.error('Error updating resumption handle:', error);
+              }
+            }
           }
           
           // Handle GoAway messages
           if (response.goAway) {
             this.sendToClient(clientId, {
               type: 'go_away',
-              sessionId,
+              sessionId: finalSessionId,
               data: response.goAway,
               timestamp: new Date().toISOString()
             });
@@ -323,15 +371,30 @@ export class LiveApiServer {
           if (response.serverContent && response.serverContent.generationComplete) {
             this.sendToClient(clientId, {
               type: 'generation_complete',
-              sessionId,
+              sessionId: finalSessionId,
               timestamp: new Date().toISOString()
             });
+          }
+
+          // Save AI response to conversation if linked
+          const sessionData = client.sessions.get(finalSessionId);
+          if (sessionData?.conversationId && (response.text || response.serverContent)) {
+            try {
+              await LiveConversationService.saveLiveMessageToConversation(
+                sessionData.conversationId,
+                finalSessionId,
+                response
+              );
+              console.log(`💾 Saved AI response to conversation ${sessionData.conversationId}`);
+            } catch (saveError) {
+              console.error('Error saving AI response to conversation:', saveError);
+            }
           }
           
           // Send all messages
           this.sendToClient(clientId, {
             type: 'session_message',
-            sessionId,
+            sessionId: finalSessionId,
             data: response,
             timestamp: new Date().toISOString()
           });
@@ -340,23 +403,26 @@ export class LiveApiServer {
         onerror: (error) => {
           this.sendToClient(clientId, {
             type: 'session_error',
-            sessionId,
+            sessionId: finalSessionId,
             error: error.message,
             timestamp: new Date().toISOString()
           });
         },
         
         onclose: (reason) => {
+          console.log(`🔴 Live session closing - sessionId: ${finalSessionId}, reason:`, reason);
+          
           this.sendToClient(clientId, {
             type: 'session_closed',
-            sessionId,
+            sessionId: finalSessionId,
             reason,
             timestamp: new Date().toISOString()
           });
           
           // Clean up session
-          client.sessions.delete(sessionId);
-          this.sessionManager.removeSession(sessionId);
+          console.log(`🧹 Cleaning up session ${finalSessionId} from client sessions`);
+          client.sessions.delete(finalSessionId);
+          this.sessionManager.removeSession(finalSessionId);
         }
       };
 
@@ -368,10 +434,9 @@ export class LiveApiServer {
         ...(!resumeHandle && { sessionResumption: {} }),
         // Enable context window compression for longer sessions
         contextWindowCompression: config.contextWindowCompression || { slidingWindow: {} },
-        // Audio transcription settings
+        // Audio transcription settings (only output supported)
         ...(config.responseModalities?.includes('AUDIO') && {
-          outputAudioTranscription: config.outputAudioTranscription || {},
-          inputAudioTranscription: config.inputAudioTranscription || {}
+          outputAudioTranscription: config.outputAudioTranscription || {}
         })
       };
 
@@ -382,28 +447,116 @@ export class LiveApiServer {
         callbacks: sessionCallbacks
       });
 
-      // Store session
-      client.sessions.set(sessionId, {
-        id: sessionId,
+      const geminiSessionId = liveSession.session?.id || 'N/A';
+      
+      console.log(`📋 Session IDs - Client: ${finalSessionId}, Gemini: ${geminiSessionId}`);
+
+      // Handle conversation integration
+      let finalConversationId = conversationId;
+      
+      if (userId) {
+        try {
+          if (!conversationId) {
+            // Create new conversation for Live API session
+            console.log(`📝 Creating new Live conversation for user ${userId}`);
+            const conversation = await ConversationService.createConversation(
+              userId, 
+              'live', 
+              {
+                model,
+                responseModalities: enhancedConfig.responseModalities || ['TEXT'],
+                mediaResolution: enhancedConfig.realtimeInputConfig?.mediaResolution || 'MEDIUM'
+              }
+            );
+            finalConversationId = conversation.conversationId;
+            console.log(`✅ Created new Live conversation: ${finalConversationId}`);
+          } else {
+            // Use existing conversation - transition to Live mode
+            console.log(`🔄 Transitioning conversation ${conversationId} to Live mode`);
+            await ConversationService.transitionToLive(conversationId, userId, enhancedConfig);
+            finalConversationId = conversationId;
+          }
+
+          // Link session to conversation
+          console.log(`🔗 Linking Live session ${finalSessionId} to conversation ${finalConversationId}`);
+          await LiveConversationService.linkLiveSessionToConversation(
+            finalConversationId, 
+            finalSessionId, 
+            enhancedConfig
+          );
+
+          // Load conversation context if requested and conversation exists
+          if (loadConversationContext && conversationId) {
+            console.log(`📚 Loading conversation context for ${finalConversationId}`);
+            
+            const contextResult = await LiveConversationService.loadConversationContextToLive(
+              finalConversationId,
+              liveSession.session,
+              20, // Load last 20 messages
+              finalSessionId // Pass the actual session ID
+            );
+
+            this.sendToClient(clientId, {
+              type: 'context_loaded',
+              sessionId: finalSessionId,
+              conversationId: finalConversationId,
+              messagesLoaded: contextResult.messagesLoaded,
+              turnsLoaded: contextResult.turnsLoaded,
+              timestamp: new Date().toISOString()
+            });
+          }
+
+        } catch (contextError) {
+          console.error('Error handling conversation integration:', contextError);
+          console.error('Context error details:', {
+            conversationId: finalConversationId,
+            userId,
+            loadConversationContext,
+            stack: contextError.stack
+          });
+          this.sendToClient(clientId, {
+            type: 'context_load_error',
+            sessionId: finalSessionId,
+            conversationId: finalConversationId,
+            error: contextError.message,
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
+
+      console.log(`🔗 Session stored in client.sessions with key: ${finalSessionId}`);
+      console.log(`📊 Current client session count: ${client.sessions.size}`);
+
+      // Store session with final conversation ID
+      client.sessions.set(finalSessionId, {
+        id: finalSessionId,
+        geminiSessionId: geminiSessionId,
         session: liveSession.session,
         model,
         provider,
+        conversationId: finalConversationId,
+        userId,
         createdAt: new Date(),
         lastActivity: new Date()
       });
 
-      this.sessionManager.addSession(sessionId, {
+      this.sessionManager.addSession(finalSessionId, {
         clientId,
         session: liveSession.session,
         model,
-        provider
+        provider,
+        conversationId: finalConversationId,
+        userId,
+        geminiSessionId: geminiSessionId
       });
 
       this.sendToClient(clientId, {
         type: 'session_created',
-        sessionId,
+        sessionId: finalSessionId,
+        geminiSessionId: geminiSessionId,
         model,
         provider,
+        conversationId: finalConversationId,
         timestamp: new Date().toISOString()
       });
 
@@ -418,6 +571,8 @@ export class LiveApiServer {
    */
   async handleSendMessage(clientId, message) {
     try {
+      console.log(`📤 handleSendMessage received:`, JSON.stringify(message, null, 2));
+      
       let sessionId, text, file, turnComplete = true;
       
       // Handle different message formats
@@ -429,19 +584,65 @@ export class LiveApiServer {
         if (client && client.sessions.size > 0) {
           sessionId = Array.from(client.sessions.keys())[0];
         }
-      } else {
-        // Handle structured message format: { type: 'send_message', data: { ... } }
+      } else if (message.type === 'send_message') {
+        // Handle structured message format: { type: 'send_message', sessionId: 'xxx', data: { ... } }
+        sessionId = message.sessionId || (message.data && message.data.sessionId);
         const data = message.data || {};
-        sessionId = data.sessionId;
-        text = data.text;
-        file = data.file;
+        
+        // Handle turns format (multimodal) vs simple format
+        if (data.turns && Array.isArray(data.turns) && data.turns.length > 0) {
+          // Extract from turns format: { turns: [{ role: 'user', parts: [...] }] }
+          const userTurn = data.turns.find(turn => turn.role === 'user');
+          if (userTurn && userTurn.parts && Array.isArray(userTurn.parts)) {
+            // Extract text from parts
+            const textPart = userTurn.parts.find(part => part.text);
+            if (textPart) {
+              text = textPart.text;
+            }
+            
+            // Extract file from parts (fileData or inlineData)
+            const filePart = userTurn.parts.find(part => part.fileData || part.inlineData);
+            if (filePart) {
+              if (filePart.fileData) {
+                // Large file via Google File API
+                file = {
+                  uri: filePart.fileData.fileUri,
+                  mimeType: filePart.fileData.mimeType
+                };
+              } else if (filePart.inlineData) {
+                // Small file inline
+                file = {
+                  data: filePart.inlineData.data,
+                  mimeType: filePart.inlineData.mimeType
+                };
+              }
+            }
+          }
+        } else {
+          // Handle simple format: { text: 'content', file: {...} }
+          text = data.text;
+          file = data.file;
+        }
+        
         turnComplete = data.turnComplete !== undefined ? data.turnComplete : true;
+      } else {
+        // Fallback: try to extract from any format
+        sessionId = message.sessionId || (message.data && message.data.sessionId);
+        text = message.text || (message.data && message.data.text);
+        file = message.file || (message.data && message.data.file);
+        turnComplete = message.turnComplete !== undefined ? message.turnComplete : 
+                      (message.data && message.data.turnComplete !== undefined ? message.data.turnComplete : true);
       }
       
+      console.log(`📋 Extracted - sessionId: ${sessionId}, text: "${text}", type: ${message.type}, hasFile: ${!!file}`);
+      
       const client = this.clients.get(clientId);
+      console.log(`🔍 Available sessions for client:`, Array.from(client.sessions.keys()));
+      
       const sessionData = client.sessions.get(sessionId);
       
       if (!sessionData) {
+        console.log(`❌ Session ${sessionId} not found. Available sessions:`, Array.from(client.sessions.keys()));
         return this.sendError(clientId, `Session ${sessionId} not found`);
       }
 
@@ -486,6 +687,27 @@ export class LiveApiServer {
       });
 
       console.log(`[Live Backend] Sent text data via sendClientContent for session ${sessionData.id}.`);
+
+      // Save user message to conversation if linked
+      const sessionInfo = this.sessionManager.getSession(sessionId);
+      if (sessionInfo && sessionInfo.conversationId) {
+        try {
+          const userMessage = {
+            text: text,
+            role: 'user',
+            sessionId: sessionId
+          };
+
+          await LiveConversationService.saveLiveMessageToConversation(
+            sessionInfo.conversationId,
+            sessionId,
+            userMessage
+          );
+          console.log(`💾 Saved user message to conversation ${sessionInfo.conversationId}`);
+        } catch (saveError) {
+          console.error('Error saving user message to conversation:', saveError);
+        }
+      }
 
     } catch (error) {
       console.error('Send message error:', error);
@@ -783,8 +1005,11 @@ export class LiveApiServer {
 /**
  * Setup WebSocket server with the provided WebSocketServer instance
  */
-export function setupWebSocketServer(wss) {
+export async function setupWebSocketServer(wss) {
   const liveApiServer = new LiveApiServer();
+  
+  // Initialize the Live API server (includes audio storage)
+  await liveApiServer.initialize();
 
   wss.on('connection', (ws, req) => {
     liveApiServer.handleConnection(ws, req);

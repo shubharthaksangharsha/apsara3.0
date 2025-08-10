@@ -910,6 +910,38 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
+// Get all users (for admin/testing purposes)
+router.get('/', async (req, res) => {
+  try {
+    const { limit = 20, offset = 0 } = req.query;
+    
+    const users = await User
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(parseInt(offset))
+      .select('id fullName email isEmailVerified role createdAt usage.lastLogin');
+
+    const total = await User.countDocuments({});
+
+    res.json({
+      success: true,
+      data: users,
+      pagination: {
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        total
+      }
+    });
+  } catch (error) {
+    console.error('Get users error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
 // Get current user profile
 router.get('/profile', authMiddleware, async (req, res) => {
   try {

@@ -103,7 +103,7 @@ router.get('/:userId', asyncHandler(async (req, res) => {
     .sort({ updatedAt: -1 })
     .limit(parseInt(limit))
     .skip(parseInt(offset))
-    .select('conversationId title status createdAt updatedAt messageCount');
+    .select('conversationId title status createdAt updatedAt stats');
 
   res.json({
     success: true,

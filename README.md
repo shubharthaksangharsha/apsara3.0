@@ -7,9 +7,11 @@ A production-ready AI conversation platform with multi-provider support, intelli
 ### 🤖 AI Integration
 - **Multi-Provider Support**: Google Gemini (extensible for Claude, GPT, xAI)
 - **Streaming Architecture**: Internal streaming for optimal performance
+- **Live API Integration**: Real-time voice/video interactions with context bridging
 - **Thinking Models**: Advanced reasoning with Gemini 2.5 series
-- **Conversation History**: Automatic context management
+- **Conversation History**: Automatic context management with REST ↔ Live switching
 - **Message Editing**: Edit and regenerate responses
+- **Unified Conversations**: Seamlessly mix REST and Live API messages
 
 ### 🔐 Authentication & Security
 - **Multiple Auth Methods**: Email/password, Google OAuth, guest login
@@ -148,13 +150,15 @@ All these operations now use streaming internally:
 | POST | `/ai/generate` | Generate AI response (auto includes history, supports files) |
 | POST | `/ai/edit-message` | Edit message and regenerate response |
 | POST | `/ai/regenerate` | Regenerate specific or last AI response |
-| POST | `/ai/embeddings` | Generate text embeddings |
+| POST | `/ai/tokens` | Count tokens for any given content |
+| WebSocket | `ws://localhost:5000/live` | Live API for real-time voice/video interactions |
 
 ### File Management Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/files/upload` | Upload files (local/s3/google-file-api) |
+| POST | `/files/smart-upload` | Intelligent file upload with preference-based routing |
 | GET | `/files` | List user's uploaded files |
 | DELETE | `/files/:fileId` | Delete a file |
 | GET | `/files/supported-types` | Get supported file types and storage methods |
@@ -248,6 +252,41 @@ curl -X POST http://localhost:5000/api/users/google-auth \
     "email": "user@gmail.com",
     "name": "Google User"
   }'
+```
+
+### Live API WebSocket Integration
+
+```javascript
+// Connect to Live API
+const ws = new WebSocket('ws://localhost:5000/live');
+
+// Create session with conversation linking
+ws.send(JSON.stringify({
+  type: 'create_session',
+  data: {
+    conversationId: 'existing_conv_123',
+    userId: 'user_123',
+    model: 'gemini-2.0-flash-live-001',
+    // Current tester sends a single response modality per session
+    config: {
+      responseModalities: ['TEXT'], // or ['AUDIO']
+      mediaResolution: 'MEDIUM'
+      // Tip: omit speechConfig to use a default voice. To force a voice:
+      // speechConfig: { voiceConfig: { voiceName: 'Aoede', languageCode: 'en-US' } }
+    },
+    loadConversationContext: true  // Loads REST messages into Live session via incremental updates
+  }
+}));
+
+// Send voice/text message
+ws.send(JSON.stringify({
+  type: 'send_message',
+  sessionId: 'session_123',
+  data: {
+    text: 'Continue our previous conversation about AI',
+    turnComplete: true
+  }
+}));
 ```
 
 ### File Upload with Multiple Storage Methods
@@ -434,14 +473,33 @@ Explore detailed usage examples and guides:
 - **[Authentication](examples/04-authentication.md)** - All authentication methods
 - **[CLI Usage](examples/05-cli-usage.md)** - Management tool guide
 - **[File Management](examples/06-file-management.md)** - Comprehensive multimodal file handling guide
+- **[Live API Management](examples/07-live-api-management.md)** - Real-time voice conversations with Gemini
 
-## 🔧 Management CLI (21 Options)
+## 🔧 Management CLI (24 Options)
 
 Start the interactive management tool:
 
 ```bash
 npm run manage
 ```
+
+### 🎙️ Live API Tester
+
+Test real-time voice and text interactions with comprehensive configuration:
+
+```bash
+npm run test:live-api
+```
+
+**Live API Tester Features:**
+- **Full Configuration**: Live model selection, response modalities, media resolution, voice settings
+- **Response Modes**: TEXT (AI responds with text) or AUDIO (AI responds with voice)
+- **Input Methods**: Send text messages or simulated audio recording
+- **MongoDB Conversation Integration**: Link to existing conversations with context loading  
+- **User & Conversation Management**: Create new or use existing conversations
+- **Quick Tests**: Instant text/audio testing with default configurations
+- **Interactive Chat**: Real-time conversation session with command support
+- **Audio Storage**: Local audio file storage with S3 placeholder for production
 
 ### CLI Features:
 
@@ -470,7 +528,10 @@ npm run manage
 18. **User-specific statistics** - Personal analytics (password protected)
 19. **Upload file and analyze with AI** - Interactive file upload with multimodal AI analysis
 20. **Regenerate AI response** - Regenerate last or specific AI response with new configuration
-21. **Exit** - Close the CLI
+21. **Test Live API Integration** - Test WebSocket Live API conversation bridging
+22. **Test Live API with Conversation** - Link Live API to existing MongoDB conversations
+23. **Create New Live Conversation** - Create new Live conversation in database
+24. **Exit** - Close the CLI
 
 ### Enhanced CLI Features
 
@@ -848,7 +909,11 @@ npm run manage
 - **Rate Limiting Engine** - Subscription-based usage control
 - **Provider Manager** - AI service abstraction layer
 - **Plugin System** - Extensible tool integration
-- **Conversation Engine** - Message flow and history management
+- **Conversation Engine** - Message flow and unified REST ↔ Live conversation history
+- **Live API Integration** - Real-time WebSocket voice conversations with MongoDB persistence
+ - Incremental context bridging from REST → Live via Gemini Live turns format
+ - Client-generated session IDs for robustness (Gemini may return "N/A")
+- **Audio Storage Service** - Voice message recording, playback, and file management
 - **Usage Tracker** - Real-time usage monitoring and analytics
 
 ### Design Patterns
@@ -863,10 +928,12 @@ npm run manage
 ### Recommended Setup
 - **Application**: PM2 process manager
 - **Database**: MongoDB Atlas or self-hosted replica set
-- **Reverse Proxy**: Nginx with SSL termination
+- **Reverse Proxy**: Nginx with SSL termination and WebSocket support
 - **Monitoring**: Application and infrastructure monitoring
 - **Email**: Production-grade email service
 - **Backup**: Automated database backups
+- **Audio Storage**: S3 or equivalent for Live API audio files
+- **WebSocket Scaling**: Redis for session management across instances
 
 ### Security Checklist
 - [ ] Environment variables secured
@@ -876,6 +943,9 @@ npm run manage
 - [ ] JWT secret rotated regularly
 - [ ] Email OTP expiration set
 - [ ] Google OAuth properly configured
+- [ ] WebSocket connection security configured
+- [ ] Live API session authentication enabled
+- [ ] Audio file access controls implemented
 - [ ] Request logging enabled
 - [ ] Error tracking implemented
 

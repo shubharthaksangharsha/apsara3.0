@@ -156,3 +156,6 @@ backend/credentials2.json
 backend/.env
 frontend/.env
 frontend/.env.local
+
+#app building 
+app/

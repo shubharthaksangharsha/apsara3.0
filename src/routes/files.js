@@ -77,6 +77,17 @@ function determineOptimalStorage(files, options = {}) {
   const fileCount = files.length;
   const maxFileSize = Math.max(...files.map(f => f.size));
   
+  // Check for PDF files - they MUST use Google File API for Live API compatibility
+  const hasPdfs = files.some(file => file.mimetype === 'application/pdf');
+  if (hasPdfs) {
+    return {
+      method: 'google-file-api',
+      reason: `PDF files detected. PDFs require Google File API for Live API compatibility.`,
+      metrics: { totalSize, fileCount, maxFileSize, hasPdfs: true },
+      preference: preference
+    };
+  }
+  
   // Thresholds (configurable via environment)
   const SMALL_FILE_THRESHOLD = parseInt(process.env.SMALL_FILE_THRESHOLD) || 5 * 1024 * 1024; // 5MB
   const LARGE_FILE_THRESHOLD = parseInt(process.env.LARGE_FILE_THRESHOLD) || 20 * 1024 * 1024; // 20MB
@@ -314,7 +325,7 @@ router.post('/upload', (req, res, next) => {
 
       await fileRecord.save();
 
-      uploadResults.push({
+      const resultEntry = {
         fileId: fileRecord.fileId,
         originalName: file.originalname,
         size: file.size,
@@ -322,7 +333,14 @@ router.post('/upload', (req, res, next) => {
         storageMethod: finalStorageMethod,
         url: fileRecord.getAccessUrl(),
         expiresAt: fileRecord.storage.expiresAt
-      });
+      };
+      
+      // Include Google File API URI for Live API compatibility
+      if (finalStorageMethod === 'google-file-api' && fileRecord.aiProviderFile?.fileUri) {
+        resultEntry.uri = fileRecord.aiProviderFile.fileUri;
+      }
+      
+      uploadResults.push(resultEntry);
     }
 
     const response = {
@@ -502,7 +520,7 @@ router.post('/smart-upload', (req, res, next) => {
 
       await fileRecord.save();
 
-      uploadResults.push({
+      const resultEntry = {
         fileId: fileRecord.fileId,
         originalName: file.originalname,
         size: file.size,
@@ -510,7 +528,14 @@ router.post('/smart-upload', (req, res, next) => {
         storageMethod: finalStorageMethod,
         url: fileRecord.getAccessUrl(),
         expiresAt: fileRecord.storage.expiresAt
-      });
+      };
+      
+      // Include Google File API URI for Live API compatibility
+      if (finalStorageMethod === 'google-file-api' && fileRecord.aiProviderFile?.fileUri) {
+        resultEntry.uri = fileRecord.aiProviderFile.fileUri;
+      }
+      
+      uploadResults.push(resultEntry);
     }
 
     res.json({

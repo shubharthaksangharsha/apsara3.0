@@ -44,7 +44,6 @@ class ApsaraServer {
     
     this.setupMiddleware();
     this.setupRoutes();
-    this.setupWebSocket();
     this.setupErrorHandling();
   }
 
@@ -126,8 +125,8 @@ class ApsaraServer {
     });
   }
 
-  setupWebSocket() {
-    setupWebSocketServer(this.wss);
+  async setupWebSocket() {
+    await setupWebSocketServer(this.wss);
   }
 
   setupErrorHandling() {
@@ -160,6 +159,9 @@ class ApsaraServer {
 
       // Initialize AI providers
       await ProviderManager.initialize();
+      
+      // Setup WebSocket server
+      await this.setupWebSocket();
 
       // Start server
       this.server.listen(this.port, () => {

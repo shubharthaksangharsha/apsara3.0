@@ -9,6 +9,14 @@ Apsara supports three file storage methods:
 - **S3 Storage**: Files stored in AWS S3 bucket (production, manual conversion needed for AI)
 - **Google File API**: Direct upload to Google (AI processing optimized, 48h expiry)
 
+### 🧠 Smart Upload System
+
+Apsara now includes an intelligent upload system that automatically selects the optimal storage method based on your preferences:
+
+- **🚀 Speed**: Prioritizes local storage for faster upload/access
+- **🧠 Processing**: Optimizes for AI processing using Google File API
+- **💾 Storage**: Balances between local and cloud based on file size
+
 ### 🔄 Automatic AI Processing
 
 **Local files** are now **automatically compatible** with AI processing! When you upload to local storage and use the file with AI, Apsara automatically uploads a temporary copy to Google File API for processing while keeping your original file in local storage.
@@ -20,6 +28,53 @@ Apsara supports three file storage methods:
 - Files to upload (images, audio, video, documents)
 
 ## 1. File Upload Methods
+
+### Smart Upload (Recommended)
+
+The intelligent upload system automatically selects the best storage method based on your preference.
+
+```bash
+curl -X POST http://localhost:5000/api/files/smart-upload \
+  -H "Content-Type: multipart/form-data" \
+  -F "files=@image.jpg" \
+  -F "userId=user_123" \
+  -F "conversationId=conv_456" \
+  -F "aiProvider=google" \
+  -F "preference=speed" \
+  -F "displayName=Smart Upload Demo"
+```
+
+**Preferences:**
+- `speed`: Optimizes for fast upload/access (prefers local storage)
+- `processing`: Optimizes for AI processing (prefers Google File API)
+- `storage`: Balances storage efficiency (size-based routing)
+
+**Response:**
+```json
+{
+  "success": true,
+  "storageMethod": "local",
+  "files": [
+    {
+      "fileId": "file_1735123456_abc123def",
+      "originalName": "image.jpg",
+      "size": 156789,
+      "mimeType": "image/jpeg",
+      "storageMethod": "local",
+      "url": "/api/files/file_1735123456_abc123def/download",
+      "smartUploadDecision": {
+        "reason": "Speed preference: Using local storage for faster upload/access",
+        "preference": "speed",
+        "metrics": {
+          "totalSize": "0.15MB",
+          "fileCount": 1,
+          "maxFileSize": "0.15MB"
+        }
+      }
+    }
+  ]
+}
+```
 
 ### Local Storage Upload
 
@@ -649,4 +704,4 @@ const FileUpload = ({ onFileAnalyzed }) => {
 - Compress images and documents when appropriate
 - Monitor storage usage and costs
 
-This comprehensive guide covers all aspects of file management in the Apsara AI backend, from basic uploads to advanced multimodal AI interactions. 
+This comprehensive guide covers all aspects of file management in the Apsara AI backend, from basic uploads to advanced multimodal AI interactions. For Live API audio management, see the [Live API Management Guide](07-live-api-management.md). 

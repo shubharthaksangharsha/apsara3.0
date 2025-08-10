@@ -180,7 +180,7 @@ export class GoogleProvider extends BaseProvider {
   async createLiveSession(params) {
     this.validateInitialization();
 
-    const { model = 'gemini-live-2.5-flash-preview', config = {}, callbacks = {} } = params;
+    const { model = 'gemini-2.0-flash-live-001', config = {}, callbacks = {} } = params;
 
     try {
       const session = await this.client.live.connect({
@@ -196,10 +196,10 @@ export class GoogleProvider extends BaseProvider {
           ...config
         },
         callbacks: {
-          onopen: callbacks.onopen || (() => console.log('Live session opened')),
-          onmessage: callbacks.onmessage || ((message) => console.log('Message:', message)),
-          onerror: callbacks.onerror || ((error) => console.error('Live session error:', error)),
-          onclose: callbacks.onclose || ((reason) => console.log('Live session closed:', reason)),
+          onopen: callbacks.onopen || (() => console.log('🟢 Google Live session opened')),
+          onmessage: callbacks.onmessage || ((message) => console.log('📨 Google Live message:', message)),
+          onerror: callbacks.onerror || ((error) => console.error('🔴 Google Live session error:', error)),
+          onclose: callbacks.onclose || ((reason) => console.log('🔴 Google Live session closed:', reason)),
           ...callbacks
         }
       });
