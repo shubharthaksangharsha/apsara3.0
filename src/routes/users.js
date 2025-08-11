@@ -608,8 +608,19 @@ router.post('/verify-email', async (req, res) => {
       console.error('Failed to send welcome email:', emailError);
     }
 
-  res.json({
-    success: true,
+    // Generate JWT token for automatic login after verification
+    const token = jwt.sign(
+      { 
+        id: user._id,
+        email: user.email,
+        role: user.role
+      },
+      process.env.JWT_SECRET || 'default-secret-key',
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    );
+
+    res.json({
+      success: true,
       message: 'Email verified successfully!',
       data: {
         user: {
@@ -618,7 +629,8 @@ router.post('/verify-email', async (req, res) => {
           email: user.email,
           isEmailVerified: user.isEmailVerified,
           role: user.role
-        }
+        },
+        token: token
       }
     });
 
