@@ -1,6 +1,8 @@
 import express from 'express';
 import User from '../models/User.js';
 import UserUsage from '../models/UserUsage.js';
+import Conversation from '../models/Conversation.js';
+import Message from '../models/Message.js';
 import emailService from '../services/emailService.js';
 import Joi from 'joi';
 import jwt from 'jsonwebtoken';
@@ -989,6 +991,50 @@ router.put('/profile', authMiddleware, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error'
+    });
+  }
+});
+
+// Delete user account (with all conversations and messages)
+router.delete('/account', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user._id.toString();
+    const user = req.user;
+
+    console.log(`🗑️ Deleting user account: ${user.fullName} (${user.email})`);
+
+    // Get count of conversations and messages for logging
+    const conversationCount = await Conversation.countDocuments({ userId });
+    const messageCount = await Message.countDocuments({ userId });
+
+    console.log(`📊 Found ${conversationCount} conversations and ${messageCount} messages to delete`);
+
+    // Delete all user data in parallel for better performance
+    await Promise.all([
+      Conversation.deleteMany({ userId }),
+      Message.deleteMany({ userId }),
+      UserUsage.deleteMany({ userId }),
+      User.deleteOne({ _id: user._id })
+    ]);
+
+    console.log(`✅ User account deleted successfully: ${user.email}`);
+    console.log(`📊 Deleted: User + ${conversationCount} conversations + ${messageCount} messages`);
+
+    res.json({
+      success: true,
+      message: 'Account deleted successfully',
+      data: {
+        deletedConversations: conversationCount,
+        deletedMessages: messageCount
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Delete account error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete account',
+      error: error.message
     });
   }
 });
