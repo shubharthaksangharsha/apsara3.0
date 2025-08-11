@@ -41,6 +41,9 @@ const messageSchema = new mongoose.Schema({
     // Text content
     text: String,
     
+    // AI thinking content (for model responses)
+    thoughts: String,
+    
     // File references (stored in S3/Google)
     files: [{
       fileId: String,
@@ -283,7 +286,7 @@ messageSchema.statics.findByConversation = function(conversationId, limit = 50, 
     .limit(includeHistory ? limit : limit);
 };
 
-messageSchema.statics.getConversationHistory = function(conversationId, includeThoughts = false) {
+messageSchema.statics.getConversationHistory = function(conversationId, includeThoughts = true) {
   const query = { 
     conversationId, 
     isVisible: true,
