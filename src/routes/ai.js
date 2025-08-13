@@ -123,6 +123,9 @@ const regenerateSchema = Joi.object({
   userId: Joi.string().required(),
   conversationId: Joi.string().required(),
   messageId: Joi.string().optional(), // If not provided, regenerates last AI message
+  files: Joi.array().items(
+    Joi.string() // File IDs or URIs
+  ).default([]),
   model: Joi.string().default('gemini-2.5-flash'),
   provider: Joi.string().default('google'),
   config: Joi.object({
@@ -814,6 +817,9 @@ router.post('/edit-message', asyncHandler(async (req, res) => {
     conversationId: Joi.string().required(),
     messageId: Joi.string().required(),
     newContent: Joi.string().required(),
+    files: Joi.array().items(
+      Joi.string() // File IDs or URIs
+    ).default([]),
     model: Joi.string().default('gemini-2.5-flash'),
     provider: Joi.string().default('google'),
     config: Joi.object({
@@ -837,7 +843,7 @@ router.post('/edit-message', asyncHandler(async (req, res) => {
     });
   }
 
-  const { userId, conversationId, messageId, newContent, model, provider, config } = value;
+  const { userId, conversationId, messageId, newContent, files, model, provider, config } = value;
 
   try {
     // Verify conversation exists and belongs to user
@@ -886,9 +892,102 @@ router.post('/edit-message', asyncHandler(async (req, res) => {
 
     // Prepare messages for AI (include history + edited message)
     let messages = [...conversationHistory];
+    
+    // Process files and prepare parts for edited user message
+    const messageParts = [];
+    
+    // Add file parts first (if any)
+    if (files && files.length > 0) {
+      for (const fileIdOrUri of files) {
+        try {
+          let fileData;
+          
+          // Check if it's a direct URI (for google-file-api)
+          if (fileIdOrUri.startsWith('gs://') || fileIdOrUri.startsWith('https://generativelanguage.googleapis.com/')) {
+            // Direct Google File API URI
+            fileData = {
+              fileUri: fileIdOrUri
+            };
+          } else {
+            // Look up file by ID
+            const file = await File.findOne({ 
+              fileId: fileIdOrUri, 
+              userId: userId 
+            });
+            
+            if (!file) {
+              console.warn(`File not found: ${fileIdOrUri} for user: ${userId}`);
+              continue;
+            }
+            
+            // Check if file is expired
+            if (file.isExpired()) {
+              console.warn(`File expired: ${fileIdOrUri}`);
+              continue;
+            }
+            
+            // Get appropriate URI based on storage method
+            if (file.storage.provider === 'google-file-api' && file.aiProviderFile?.fileUri) {
+              fileData = {
+                fileUri: file.aiProviderFile.fileUri,
+                mimeType: file.mimeType
+              };
+            } else if (file.storage.provider === 'local' && file.storage.path) {
+              // Use inline base64 data for local files (more efficient for files <20MB)
+              console.log(`📄 Processing local file as inline data for AI: ${fileIdOrUri}`);
+              try {
+                const fs = await import('fs');
+                const fileBuffer = await fs.promises.readFile(file.storage.path);
+                const base64Data = fileBuffer.toString('base64');
+                
+                fileData = {
+                  inlineData: {
+                    mimeType: file.mimeType,
+                    data: base64Data
+                  }
+                };
+
+                console.log(`✅ Local file processed as inline data (${(fileBuffer.length / 1024 / 1024).toFixed(2)}MB)`);
+              } catch (readError) {
+                console.error(`❌ Failed to read local file: ${readError.message}`);
+                continue;
+              }
+            } else if (file.storage.provider === 's3' && file.storage.url) {
+              // For S3, we'd need to download and upload to Google File API first for AI processing
+              console.warn(`S3 files need to be downloaded and uploaded to Google File API first for AI processing: ${fileIdOrUri}`);
+              console.warn(`This requires additional implementation for S3 file download and re-upload`);
+              continue;
+            }
+          }
+          
+          if (fileData) {
+            // Add fileData directly based on its type
+            if (fileData.inlineData) {
+              // For inline base64 data
+              messageParts.push(fileData);
+            } else if (fileData.fileUri) {
+              // For Google File API URIs
+              messageParts.push({
+                fileData: {
+                  fileUri: fileData.fileUri,
+                  mimeType: fileData.mimeType
+                }
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`Error processing file ${fileIdOrUri}:`, error);
+        }
+      }
+    }
+    
+    // Add text content
+    messageParts.push({ text: newContent });
+    
+    // Add the edited user message with files and text
     messages.push({
       role: 'user',
-      parts: [{ text: newContent }]
+      parts: messageParts
     });
 
     // Prepare generation config
@@ -1043,6 +1142,7 @@ router.post('/regenerate', asyncHandler(async (req, res) => {
     userId,
     conversationId,
     messageId,
+    files,
     model,
     provider,
     config
@@ -1159,10 +1259,101 @@ router.post('/regenerate', asyncHandler(async (req, res) => {
     
     // Handle different message types appropriately
     if (precedingMessage.role === 'user') {
-      // Regular user message
+      // Regular user message - process files and prepare parts
+      const messageParts = [];
+      
+      // Add file parts first (if any)
+      if (files && files.length > 0) {
+        for (const fileIdOrUri of files) {
+          try {
+            let fileData;
+            
+            // Check if it's a direct URI (for google-file-api)
+            if (fileIdOrUri.startsWith('gs://') || fileIdOrUri.startsWith('https://generativelanguage.googleapis.com/')) {
+              // Direct Google File API URI
+              fileData = {
+                fileUri: fileIdOrUri
+              };
+            } else {
+              // Look up file by ID
+              const file = await File.findOne({ 
+                fileId: fileIdOrUri, 
+                userId: userId 
+              });
+              
+              if (!file) {
+                console.warn(`File not found: ${fileIdOrUri} for user: ${userId}`);
+                continue;
+              }
+              
+              // Check if file is expired
+              if (file.isExpired()) {
+                console.warn(`File expired: ${fileIdOrUri}`);
+                continue;
+              }
+              
+              // Get appropriate URI based on storage method
+              if (file.storage.provider === 'google-file-api' && file.aiProviderFile?.fileUri) {
+                fileData = {
+                  fileUri: file.aiProviderFile.fileUri,
+                  mimeType: file.mimeType
+                };
+              } else if (file.storage.provider === 'local' && file.storage.path) {
+                // Use inline base64 data for local files (more efficient for files <20MB)
+                console.log(`📄 Processing local file as inline data for AI: ${fileIdOrUri}`);
+                try {
+                  const fs = await import('fs');
+                  const fileBuffer = await fs.promises.readFile(file.storage.path);
+                  const base64Data = fileBuffer.toString('base64');
+                  
+                  fileData = {
+                    inlineData: {
+                      mimeType: file.mimeType,
+                      data: base64Data
+                    }
+                  };
+
+                  console.log(`✅ Local file processed as inline data (${(fileBuffer.length / 1024 / 1024).toFixed(2)}MB)`);
+                } catch (readError) {
+                  console.error(`❌ Failed to read local file: ${readError.message}`);
+                  continue;
+                }
+              } else if (file.storage.provider === 's3' && file.storage.url) {
+                // For S3, we'd need to download and upload to Google File API first for AI processing
+                console.warn(`S3 files need to be downloaded and uploaded to Google File API first for AI processing: ${fileIdOrUri}`);
+                console.warn(`This requires additional implementation for S3 file download and re-upload`);
+                continue;
+              }
+            }
+            
+            if (fileData) {
+              // Add fileData directly based on its type
+              if (fileData.inlineData) {
+                // For inline base64 data
+                messageParts.push(fileData);
+              } else if (fileData.fileUri) {
+                // For Google File API URIs
+                messageParts.push({
+                  fileData: {
+                    fileUri: fileData.fileUri,
+                    mimeType: fileData.mimeType
+                  }
+                });
+              }
+            }
+          } catch (error) {
+            console.error(`Error processing file ${fileIdOrUri}:`, error);
+          }
+        }
+      }
+      
+      // Add text content
+      messageParts.push({ text: precedingMessage.content.text });
+      
+      // Add user message with files and text
       messages.push({
         role: 'user',
-        parts: [{ text: precedingMessage.content.text }]
+        parts: messageParts
       });
     } else if (precedingMessage.role === 'tool') {
       // Tool/plugin message - format for AI understanding
