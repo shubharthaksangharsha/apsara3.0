@@ -77,20 +77,55 @@ function determineOptimalStorage(files, options = {}) {
   const fileCount = files.length;
   const maxFileSize = Math.max(...files.map(f => f.size));
   
-  // Check for PDF files - they MUST use Google File API for Live API compatibility
+  // Check file types for optimized storage decisions
+  const hasImages = files.some(file => file.mimetype.startsWith('image/'));
   const hasPdfs = files.some(file => file.mimetype === 'application/pdf');
-  if (hasPdfs) {
+  const hasVideos = files.some(file => file.mimetype.startsWith('video/'));
+  const hasAudio = files.some(file => file.mimetype.startsWith('audio/'));
+  
+  // Images and PDFs prefer local storage for fast access (changed from Google API)
+  if ((hasImages || hasPdfs) && !hasVideos && maxFileSize <= LARGE_FILE_THRESHOLD) {
     return {
-      method: 'google-file-api',
-      reason: `PDF files detected. PDFs require Google File API for Live API compatibility.`,
-      metrics: { totalSize, fileCount, maxFileSize, hasPdfs: true },
+      method: 'local',
+      reason: `Image/PDF files detected (${hasImages ? 'images' : ''}${hasImages && hasPdfs ? ' and ' : ''}${hasPdfs ? 'PDFs' : ''}). Using local storage for fast access and persistence.`,
+      metrics: { totalSize, fileCount, maxFileSize, hasImages, hasPdfs },
       preference: preference
     };
+  }
+  
+  // Videos always use Google File API for processing optimization
+  if (hasVideos) {
+    return {
+      method: 'google-file-api',
+      reason: `Video files detected. Using Google File API for optimal video processing.`,
+      metrics: { totalSize, fileCount, maxFileSize, hasVideos: true },
+      preference: preference
+    };
+  }
+  
+  // Audio files: size-based decision
+  if (hasAudio && !hasImages && !hasPdfs) {
+    if (maxFileSize <= AUDIO_SIZE_THRESHOLD) {
+      return {
+        method: 'local',
+        reason: `Small audio files detected (max: ${(maxFileSize/1024/1024).toFixed(1)}MB). Using local storage for fast access.`,
+        metrics: { totalSize, fileCount, maxFileSize, hasAudio: true },
+        preference: preference
+      };
+    } else {
+      return {
+        method: 'google-file-api',
+        reason: `Large audio files detected (max: ${(maxFileSize/1024/1024).toFixed(1)}MB). Using Google File API for processing.`,
+        metrics: { totalSize, fileCount, maxFileSize, hasAudio: true },
+        preference: preference
+      };
+    }
   }
   
   // Thresholds (configurable via environment)
   const SMALL_FILE_THRESHOLD = parseInt(process.env.SMALL_FILE_THRESHOLD) || 5 * 1024 * 1024; // 5MB
   const LARGE_FILE_THRESHOLD = parseInt(process.env.LARGE_FILE_THRESHOLD) || 20 * 1024 * 1024; // 20MB
+  const AUDIO_SIZE_THRESHOLD = parseInt(process.env.AUDIO_SIZE_THRESHOLD) || 10 * 1024 * 1024; // 10MB for audio
   const TOTAL_SIZE_THRESHOLD = parseInt(process.env.TOTAL_SIZE_THRESHOLD) || 50 * 1024 * 1024; // 50MB
   const MULTIPLE_FILES_THRESHOLD = parseInt(process.env.MULTIPLE_FILES_THRESHOLD) || 3;
   

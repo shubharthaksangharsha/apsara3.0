@@ -311,6 +311,7 @@ router.post('/generate', asyncHandler(async (req, res) => {
               mimeType: file.mimeType,
               size: file.size,
               type: file.type,
+              storageProvider: file.storage.provider,
               url: file.getAccessUrl()
             });
           }
