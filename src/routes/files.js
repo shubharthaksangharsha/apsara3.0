@@ -652,6 +652,110 @@ router.get('/:fileId', asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route GET /api/files/:fileId/download
+ * @desc Download/serve a file
+ * @access Public
+ */
+router.get('/:fileId/download', asyncHandler(async (req, res) => {
+  const { fileId } = req.params;
+  const { userId } = req.query;
+
+  if (!fileId) {
+    return res.status(400).json({
+      success: false,
+      error: { message: 'File ID is required' }
+    });
+  }
+
+  // Find file by fileId (userId optional for public access to uploaded files)
+  const file = await File.findOne({ fileId });
+  if (!file) {
+    return res.status(404).json({
+      success: false,
+      error: { message: 'File not found' }
+    });
+  }
+
+  // Check if file is expired
+  if (file.isExpired()) {
+    return res.status(410).json({
+      success: false,
+      error: { message: 'File has expired' }
+    });
+  }
+
+  try {
+    // Handle different storage providers
+    switch (file.storage.provider) {
+      case 'local':
+        // Serve local file
+        const filePath = file.storage.path;
+        
+        // Check if file exists
+        try {
+          await fs.access(filePath, fs.constants.F_OK);
+        } catch (error) {
+          return res.status(404).json({
+            success: false,
+            error: { message: 'File not found on disk' }
+          });
+        }
+
+        // Increment access count
+        await file.incrementAccess();
+
+        // Set appropriate headers
+        res.setHeader('Content-Type', file.mimeType);
+        res.setHeader('Content-Disposition', `inline; filename="${file.originalName}"`);
+        res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+        
+        // Send file
+        res.sendFile(path.resolve(filePath));
+        break;
+
+      case 'google-file-api':
+        // Redirect to Google File API URL
+        if (file.aiProviderFile?.fileUri) {
+          await file.incrementAccess();
+          res.redirect(file.aiProviderFile.fileUri);
+        } else {
+          res.status(404).json({
+            success: false,
+            error: { message: 'File URI not available' }
+          });
+        }
+        break;
+
+      case 's3':
+        // Redirect to S3 URL
+        if (file.storage.url) {
+          await file.incrementAccess();
+          res.redirect(file.storage.url);
+        } else {
+          res.status(404).json({
+            success: false,
+            error: { message: 'S3 URL not available' }
+          });
+        }
+        break;
+
+      default:
+        res.status(500).json({
+          success: false,
+          error: { message: 'Unknown storage provider' }
+        });
+    }
+
+  } catch (error) {
+    console.error('Error serving file:', error);
+    res.status(500).json({
+      success: false,
+      error: { message: 'Failed to serve file' }
+    });
+  }
+}));
+
+/**
  * @route DELETE /api/files/:fileId
  * @desc Delete a file
  * @access Public

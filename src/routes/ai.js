@@ -290,8 +290,36 @@ router.post('/generate', asyncHandler(async (req, res) => {
     const messageSequence = conversation.getNextMessageSequence();
     await conversation.save();
 
-    // Create user message
+    // Create user message with file references
     const userMessageId = uuidv4();
+    
+    // Prepare file references for message content
+    const messageFiles = [];
+    if (files && files.length > 0) {
+      for (const fileIdOrUri of files) {
+        try {
+          // Look up file by ID to get metadata
+          const file = await File.findOne({ 
+            fileId: fileIdOrUri, 
+            userId: userId 
+          });
+          
+          if (file && !file.isExpired()) {
+            messageFiles.push({
+              fileId: file.fileId,
+              originalName: file.originalName,
+              mimeType: file.mimeType,
+              size: file.size,
+              type: file.type,
+              url: file.getAccessUrl()
+            });
+          }
+        } catch (error) {
+          console.error(`Error getting file metadata for message: ${fileIdOrUri}`, error);
+        }
+      }
+    }
+    
     const userMessage = new Message({
       messageId: userMessageId,
       conversationId,
@@ -300,7 +328,8 @@ router.post('/generate', asyncHandler(async (req, res) => {
       messageType: 'rest',
       role: 'user',
       content: {
-        text: typeof contents === 'string' ? contents : JSON.stringify(contents)
+        text: typeof contents === 'string' ? contents : JSON.stringify(contents),
+        files: messageFiles // Store file references in message content
       },
       status: 'completed',
       metadata: {
