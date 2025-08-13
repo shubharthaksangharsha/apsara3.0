@@ -896,9 +896,13 @@ router.post('/edit-message', asyncHandler(async (req, res) => {
     // Process files and prepare parts for edited user message
     const messageParts = [];
     
-    // Add file parts first (if any)
-    if (files && files.length > 0) {
-      for (const fileIdOrUri of files) {
+    // Get files from the original message (not from request - edit only changes text)
+    const originalFiles = messageToEdit.content.files || [];
+    const fileIds = originalFiles.map(file => file.fileId).filter(Boolean);
+    
+    // Add file parts first (if any) from the original message
+    if (fileIds.length > 0) {
+      for (const fileIdOrUri of fileIds) {
         try {
           let fileData;
           
@@ -1262,9 +1266,13 @@ router.post('/regenerate', asyncHandler(async (req, res) => {
       // Regular user message - process files and prepare parts
       const messageParts = [];
       
-      // Add file parts first (if any)
-      if (files && files.length > 0) {
-        for (const fileIdOrUri of files) {
+      // Get files from the preceding user message (not from request)
+      const originalFiles = precedingMessage.content.files || [];
+      const fileIds = originalFiles.map(file => file.fileId).filter(Boolean);
+      
+      // Add file parts first (if any) from the preceding message
+      if (fileIds.length > 0) {
+        for (const fileIdOrUri of fileIds) {
           try {
             let fileData;
             
