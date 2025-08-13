@@ -47,11 +47,18 @@ const messageSchema = new mongoose.Schema({
     // File references (stored in S3/Google)
     files: [{
       fileId: String,
+      originalName: String,  // Added: Original filename
       url: String,
       mimeType: String,
+      size: Number,          // Added: File size in bytes
       type: {
         type: String,
-        enum: ['image', 'audio', 'video', 'document', 'screen']
+        enum: ['image', 'audio', 'video', 'document', 'screen', 'other']
+      },
+      storageProvider: {     // Added: Storage provider info
+        type: String,
+        enum: ['local', 's3', 'google-file-api'],
+        default: 'local'
       },
       metadata: mongoose.Schema.Types.Mixed
     }],
