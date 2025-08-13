@@ -5,17 +5,17 @@ dotenv.config();
 
 // Configure rate limiters for different endpoints
 const rateLimiters = {
-  // General API rate limiter
+  // General API rate limiter (lighter for read operations)
   api: new RateLimiterMemory({
     keyGenerator: (req) => req.ip,
-    points: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+    points: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 200, // Increased for read operations
     duration: (parseInt(process.env.RATE_LIMIT_WINDOW) || 15) * 60, // 15 minutes
   }),
 
-  // Stricter rate limiting for AI endpoints
+  // Stricter rate limiting for AI endpoints (generate/regenerate/edit)
   ai: new RateLimiterMemory({
     keyGenerator: (req) => req.ip,
-    points: 50, // 50 requests
+    points: 30, // 30 AI requests
     duration: 15 * 60, // per 15 minutes
   }),
 
@@ -26,7 +26,7 @@ const rateLimiters = {
     duration: 60 * 60, // per hour
   }),
 
-  // File upload rate limiting
+  // File upload rate limiting (only for uploads, not downloads)
   fileUpload: new RateLimiterMemory({
     keyGenerator: (req) => req.ip,
     points: 20, // 20 uploads
@@ -38,20 +38,69 @@ const rateLimiters = {
     keyGenerator: (req) => req.ip,
     points: 10, // 10 attempts
     duration: 15 * 60, // per 15 minutes
+  }),
+
+  // Message operations (send, edit, delete)
+  messageOperations: new RateLimiterMemory({
+    keyGenerator: (req) => req.ip,
+    points: 60, // 60 message operations
+    duration: 15 * 60, // per 15 minutes
   })
 };
 
 export const rateLimiter = async (req, res, next) => {
   try {
+    // Skip rate limiting for specific endpoints
+    const exemptPaths = [
+      '/download', // File downloads
+      '/api/conversations', // Loading conversations and messages
+      '/api/files/', // Followed by fileId/download
+    ];
+
+    // Check if this request should be exempted
+    const isExempt = exemptPaths.some(path => {
+      if (path === '/download') {
+        return req.path.endsWith('/download');
+      }
+      if (path === '/api/conversations') {
+        return req.path.startsWith('/api/conversations') && req.method === 'GET';
+      }
+      if (path === '/api/files/') {
+        return req.path.startsWith('/api/files/') && req.path.endsWith('/download');
+      }
+      return req.path.includes(path);
+    });
+
+    if (isExempt) {
+      console.log(`Rate limit exempted for: ${req.method} ${req.path}`);
+      return next();
+    }
+
     // Choose the appropriate rate limiter based on the endpoint
     let limiter = rateLimiters.api;
     
-    if (req.path.startsWith('/api/ai')) {
+    // AI generation endpoints (generate, regenerate, edit)
+    if (req.path.includes('/generate') || 
+        req.path.includes('/regenerate') || 
+        req.path.includes('/edit') ||
+        req.path.startsWith('/api/ai')) {
       limiter = rateLimiters.ai;
-    } else if (req.path.startsWith('/api/files')) {
+    }
+    // File upload endpoints (not downloads)
+    else if (req.path.startsWith('/api/files') && 
+             (req.method === 'POST' || req.path.includes('upload'))) {
       limiter = rateLimiters.fileUpload;
-    } else if (req.path.includes('/auth') || req.path.includes('/login') || req.path.includes('/register')) {
+    }
+    // Authentication endpoints
+    else if (req.path.includes('/auth') || 
+             req.path.includes('/login') || 
+             req.path.includes('/register')) {
       limiter = rateLimiters.auth;
+    }
+    // Message operations (send, edit, delete messages)
+    else if (req.path.includes('/messages') && 
+             (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE')) {
+      limiter = rateLimiters.messageOperations;
     }
 
     await limiter.consume(req.ip);
@@ -66,6 +115,8 @@ export const rateLimiter = async (req, res, next) => {
       'X-RateLimit-Remaining': rejRes.remainingPoints || 0,
       'X-RateLimit-Reset': new Date(Date.now() + rejRes.msBeforeNext)
     });
+
+    console.error(`Rate limit exceeded for: ${req.method} ${req.path} from ${req.ip}`);
 
     const error = new Error('Too many requests, please try again later');
     error.name = 'TooManyRequestsError';
@@ -106,4 +157,4 @@ export const getRemainingPoints = async (ip, limiterType = 'api') => {
     console.error('Error getting remaining points:', error);
     return null;
   }
-}; 
+};
