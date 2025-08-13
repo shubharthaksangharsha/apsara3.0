@@ -72,6 +72,13 @@ function determineOptimalStorage(files, options = {}) {
     return { method: forceStorageProvider, reason: 'Explicitly forced by user' };
   }
   
+  // Thresholds (configurable via environment) - Define first
+  const SMALL_FILE_THRESHOLD = parseInt(process.env.SMALL_FILE_THRESHOLD) || 5 * 1024 * 1024; // 5MB
+  const LARGE_FILE_THRESHOLD = parseInt(process.env.LARGE_FILE_THRESHOLD) || 20 * 1024 * 1024; // 20MB
+  const AUDIO_SIZE_THRESHOLD = parseInt(process.env.AUDIO_SIZE_THRESHOLD) || 10 * 1024 * 1024; // 10MB for audio
+  const TOTAL_SIZE_THRESHOLD = parseInt(process.env.TOTAL_SIZE_THRESHOLD) || 50 * 1024 * 1024; // 50MB
+  const MULTIPLE_FILES_THRESHOLD = parseInt(process.env.MULTIPLE_FILES_THRESHOLD) || 3;
+  
   // Calculate total size and count
   const totalSize = files.reduce((sum, file) => sum + file.size, 0);
   const fileCount = files.length;
@@ -121,13 +128,6 @@ function determineOptimalStorage(files, options = {}) {
       };
     }
   }
-  
-  // Thresholds (configurable via environment)
-  const SMALL_FILE_THRESHOLD = parseInt(process.env.SMALL_FILE_THRESHOLD) || 5 * 1024 * 1024; // 5MB
-  const LARGE_FILE_THRESHOLD = parseInt(process.env.LARGE_FILE_THRESHOLD) || 20 * 1024 * 1024; // 20MB
-  const AUDIO_SIZE_THRESHOLD = parseInt(process.env.AUDIO_SIZE_THRESHOLD) || 10 * 1024 * 1024; // 10MB for audio
-  const TOTAL_SIZE_THRESHOLD = parseInt(process.env.TOTAL_SIZE_THRESHOLD) || 50 * 1024 * 1024; // 50MB
-  const MULTIPLE_FILES_THRESHOLD = parseInt(process.env.MULTIPLE_FILES_THRESHOLD) || 3;
   
   // Preference-based decision logic
   switch (preference) {
