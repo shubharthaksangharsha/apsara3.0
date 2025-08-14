@@ -25,6 +25,14 @@ const conversationSchema = new mongoose.Schema({
     enum: ['active', 'paused', 'completed', 'archived'],
     default: 'active'
   },
+  isPinned: {
+    type: Boolean,
+    default: false
+  },
+  pinnedAt: {
+    type: Date,
+    default: null
+  },
   
   // Configuration for the conversation
   config: {
@@ -176,6 +184,18 @@ conversationSchema.methods.updateLiveSession = function(sessionId, handle = null
 conversationSchema.methods.endLiveSession = function() {
   this.session.isLiveActive = false;
   this.session.lastActivity = new Date();
+  return this.save();
+};
+
+conversationSchema.methods.pin = function() {
+  this.isPinned = true;
+  this.pinnedAt = new Date();
+  return this.save();
+};
+
+conversationSchema.methods.unpin = function() {
+  this.isPinned = false;
+  this.pinnedAt = null;
   return this.save();
 };
 

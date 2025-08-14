@@ -30,6 +30,10 @@ const updateConversationSchema = Joi.object({
   })
 });
 
+const renameConversationSchema = Joi.object({
+  title: Joi.string().min(1).max(200).required()
+});
+
 const saveMessageSchema = Joi.object({
   conversationId: Joi.string().required(),
   content: Joi.string().required(),
@@ -100,10 +104,14 @@ router.get('/:userId', asyncHandler(async (req, res) => {
 
   const conversations = await Conversation
     .find(filter)
-    .sort({ updatedAt: -1 })
+    .sort({ 
+      isPinned: -1,        // Pinned conversations first
+      pinnedAt: -1,        // Most recently pinned first
+      updatedAt: -1        // Then by last updated
+    })
     .limit(parseInt(limit))
     .skip(parseInt(offset))
-    .select('conversationId title status createdAt updatedAt stats');
+    .select('conversationId title status isPinned pinnedAt createdAt updatedAt stats');
 
   res.json({
     success: true,
@@ -256,6 +264,93 @@ router.put('/:conversationId', asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: conversation
+  });
+}));
+
+/**
+ * @route PUT /api/conversations/:conversationId/rename
+ * @desc Rename a conversation
+ * @access Public
+ */
+router.put('/:conversationId/rename', asyncHandler(async (req, res) => {
+  const { conversationId } = req.params;
+  const { error, value } = renameConversationSchema.validate(req.body);
+  
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      error: { message: error.details[0].message }
+    });
+  }
+
+  const { title } = value;
+
+  const conversation = await Conversation.findOneAndUpdate(
+    { conversationId },
+    {
+      title,
+      updatedAt: new Date()
+    },
+    { new: true }
+  );
+
+  if (!conversation) {
+    return res.status(404).json({
+      success: false,
+      error: { message: 'Conversation not found' }
+    });
+  }
+
+  res.json({
+    success: true,
+    message: 'Conversation renamed successfully',
+    data: {
+      conversationId: conversation.conversationId,
+      title: conversation.title,
+      updatedAt: conversation.updatedAt
+    }
+  });
+}));
+
+/**
+ * @route PUT /api/conversations/:conversationId/pin
+ * @desc Pin/unpin a conversation
+ * @access Public
+ */
+router.put('/:conversationId/pin', asyncHandler(async (req, res) => {
+  const { conversationId } = req.params;
+  const { pin = true } = req.body; // Default to pin=true, can pass pin=false to unpin
+
+  const conversation = await Conversation.findOne({ conversationId });
+  if (!conversation) {
+    return res.status(404).json({
+      success: false,
+      error: { message: 'Conversation not found' }
+    });
+  }
+
+  let updatedConversation;
+  if (pin && !conversation.isPinned) {
+    updatedConversation = await conversation.pin();
+  } else if (!pin && conversation.isPinned) {
+    updatedConversation = await conversation.unpin();
+  } else {
+    updatedConversation = conversation;
+  }
+
+  const action = pin ? 'pinned' : 'unpinned';
+  const message = `Conversation ${action} successfully`;
+
+  res.json({
+    success: true,
+    message,
+    data: {
+      conversationId: updatedConversation.conversationId,
+      title: updatedConversation.title,
+      isPinned: updatedConversation.isPinned,
+      pinnedAt: updatedConversation.pinnedAt,
+      updatedAt: updatedConversation.updatedAt
+    }
   });
 }));
 
