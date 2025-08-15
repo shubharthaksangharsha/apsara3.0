@@ -26,10 +26,24 @@ const rateLimiters = {
     duration: 60 * 60, // per hour
   }),
 
-  // File upload rate limiting (only for uploads, not downloads)
-  fileUpload: new RateLimiterMemory({
+  // File upload rate limiting - Guest users (only for uploads, not downloads)
+  fileUploadGuest: new RateLimiterMemory({
     keyGenerator: (req) => req.ip,
-    points: 20, // 20 uploads
+    points: 5, // 5 uploads for guest users
+    duration: 60 * 60, // per hour
+  }),
+
+  // File upload rate limiting - Free users
+  fileUploadFree: new RateLimiterMemory({
+    keyGenerator: (req) => req.userId || req.ip,
+    points: 30, // 30 uploads for free users
+    duration: 60 * 60, // per hour
+  }),
+
+  // File upload rate limiting - Pro users (unlimited, but keeping a high limit for safety)
+  fileUploadPro: new RateLimiterMemory({
+    keyGenerator: (req) => req.userId || req.ip,
+    points: 10000, // Effectively unlimited for pro users
     duration: 60 * 60, // per hour
   }),
 
@@ -86,10 +100,28 @@ export const rateLimiter = async (req, res, next) => {
         req.path.startsWith('/api/ai')) {
       limiter = rateLimiters.ai;
     }
-    // File upload endpoints (not downloads)
+    // File upload endpoints (not downloads) - tier-based limiting
     else if (req.path.startsWith('/api/files') && 
              (req.method === 'POST' || req.path.includes('upload'))) {
-      limiter = rateLimiters.fileUpload;
+      // Determine user tier and apply appropriate limiter
+      const userTier = req.userTier || 'guest'; // Default to guest if no user info
+      
+      switch (userTier.toLowerCase()) {
+        case 'pro':
+        case 'premium':
+          limiter = rateLimiters.fileUploadPro;
+          break;
+        case 'free':
+        case 'registered':
+          limiter = rateLimiters.fileUploadFree;
+          break;
+        case 'guest':
+        default:
+          limiter = rateLimiters.fileUploadGuest;
+          break;
+      }
+      
+      console.log(`File upload rate limiting applied for ${userTier} user: ${req.userId || req.ip}`);
     }
     // Authentication endpoints
     else if (req.path.includes('/auth') || 
@@ -118,7 +150,29 @@ export const rateLimiter = async (req, res, next) => {
 
     console.error(`Rate limit exceeded for: ${req.method} ${req.path} from ${req.ip}`);
 
-    const error = new Error('Too many requests, please try again later');
+    // Provide tier-specific error messages for file uploads
+    let errorMessage = 'Too many requests, please try again later';
+    if (req.path.startsWith('/api/files') && 
+        (req.method === 'POST' || req.path.includes('upload'))) {
+      const userTier = req.userTier || 'guest';
+      switch (userTier.toLowerCase()) {
+        case 'guest':
+          errorMessage = `Upload limit exceeded. Guest users can upload 5 files per hour. Please register for higher limits.`;
+          break;
+        case 'free':
+        case 'registered':
+          errorMessage = `Upload limit exceeded. Free users can upload 30 files per hour. Upgrade to Pro for unlimited uploads.`;
+          break;
+        case 'pro':
+        case 'premium':
+          errorMessage = `Upload limit exceeded. Please try again in ${timeRemaining} seconds.`;
+          break;
+        default:
+          errorMessage = `Upload limit exceeded for ${userTier} tier. Please try again later.`;
+      }
+    }
+
+    const error = new Error(errorMessage);
     error.name = 'TooManyRequestsError';
     error.status = 429;
     error.retryAfter = timeRemaining;
