@@ -133,6 +133,7 @@ router.post('/register', async (req, res) => {
           email: user.email,
           isEmailVerified: user.isEmailVerified,
           role: user.role,
+          subscriptionPlan: user.subscriptionPlan,
           createdAt: user.createdAt
         },
         token,
@@ -216,6 +217,7 @@ router.post('/login', async (req, res) => {
           email: user.email,
           isEmailVerified: user.isEmailVerified,
           role: user.role,
+          subscriptionPlan: user.subscriptionPlan,
           preferences: user.preferences,
           usage: user.usage
         },
@@ -628,7 +630,8 @@ router.post('/verify-email', async (req, res) => {
           fullName: user.fullName,
           email: user.email,
           isEmailVerified: user.isEmailVerified,
-          role: user.role
+          role: user.role,
+          subscriptionPlan: user.subscriptionPlan
         },
         token: token
       }
@@ -1003,6 +1006,73 @@ router.put('/profile', authMiddleware, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error'
+    });
+  }
+});
+
+// Upgrade user subscription (placeholder for payment gateway)
+router.put('/:userId/subscription', authMiddleware, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { subscriptionPlan } = req.body;
+
+    // Validate user access (users can only update their own subscription or admin can update any)
+    if (req.user._id.toString() !== userId && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. You can only update your own subscription.'
+      });
+    }
+
+    // Validate subscription plan
+    const validPlans = ['free', 'pro', 'premium', 'enterprise'];
+    if (!validPlans.includes(subscriptionPlan)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid subscription plan. Valid plans: ' + validPlans.join(', ')
+      });
+    }
+
+    // Find and update user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Update subscription plan
+    const previousPlan = user.subscriptionPlan;
+    user.subscriptionPlan = subscriptionPlan;
+    await user.save();
+
+    // Update usage tracking for new plan
+    await UserUsage.findOrCreateUsage(userId, subscriptionPlan);
+
+    console.log(`📈 User subscription upgraded: ${user.email} from ${previousPlan} to ${subscriptionPlan}`);
+
+    res.json({
+      success: true,
+      message: `Subscription successfully upgraded to ${subscriptionPlan}`,
+      data: {
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          subscriptionPlan: user.subscriptionPlan,
+          role: user.role,
+          isEmailVerified: user.isEmailVerified,
+          avatarUrl: user.profilePicture || null
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Subscription upgrade error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during subscription upgrade'
     });
   }
 });
