@@ -355,6 +355,41 @@ router.put('/:conversationId/pin', asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route DELETE /api/conversations/user/:userId/all
+ * @desc Delete all conversations and messages for a user
+ * @access Public
+ */
+router.delete('/user/:userId/all', asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+
+  console.log(`🗑️ Deleting all conversations for user: ${userId}`);
+
+  // Get count of conversations and messages for logging
+  const conversationCount = await Conversation.countDocuments({ userId });
+  const messageCount = await Message.countDocuments({ userId });
+
+  console.log(`📊 Found ${conversationCount} conversations and ${messageCount} messages to delete`);
+
+  // Delete all conversations and messages for this user
+  await Promise.all([
+    Conversation.deleteMany({ userId }),
+    Message.deleteMany({ userId })
+  ]);
+
+  console.log(`✅ All conversations deleted successfully for user: ${userId}`);
+  console.log(`📊 Deleted: ${conversationCount} conversations + ${messageCount} messages`);
+
+  res.json({
+    success: true,
+    message: 'All conversations and messages deleted successfully',
+    data: {
+      deletedConversations: conversationCount,
+      deletedMessages: messageCount
+    }
+  });
+}));
+
+/**
  * @route DELETE /api/conversations/:conversationId
  * @desc Delete a conversation and all its messages
  * @access Public
