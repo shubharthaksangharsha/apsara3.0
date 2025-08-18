@@ -67,7 +67,7 @@ const userSchema = new mongoose.Schema({
   },
   subscriptionPlan: { 
     type: String, 
-    enum: ['guest', 'free', 'pro', 'premium', 'enterprise'], 
+    enum: ['guest', 'free', 'premium', 'enterprise'], 
     default: 'free' 
   },
   // OAuth and authentication provider fields

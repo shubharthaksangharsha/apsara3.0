@@ -10,7 +10,7 @@ const userUsageSchema = new mongoose.Schema({
   },
   subscriptionPlan: {
     type: String,
-    enum: ['guest', 'free', 'pro', 'premium', 'enterprise'],
+    enum: ['guest', 'free', 'premium', "enterprise"],
     default: 'free',
     index: true
   },
@@ -73,17 +73,9 @@ userUsageSchema.statics.getRateLimits = function(subscriptionPlan) {
       'gemini-2.5-flash': { limit: 20, type: 'daily' },
       'gemini-2.5-pro': { limit: 5, type: 'daily' }
     },
-    pro: {
-      'gemini-2.5-flash': { limit: 50, type: 'daily' },
-      'gemini-2.5-pro': { limit: 20, type: 'daily' }
-    },
     premium: {
       'gemini-2.5-flash': { limit: 100, type: 'daily' },
       'gemini-2.5-pro': { limit: 50, type: 'daily' }
-    },
-    enterprise: {
-      'gemini-2.5-flash': { limit: 500, type: 'daily' },
-      'gemini-2.5-pro': { limit: 200, type: 'daily' }
     }
   };
   
