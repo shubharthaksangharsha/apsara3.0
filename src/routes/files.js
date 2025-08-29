@@ -7,7 +7,6 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import ProviderManager from '../providers/ProviderManager.js';
 import File from '../models/File.js';
 import { getFileUploadLimitInfo } from '../middleware/rateLimiter.js';
-import authMiddleware from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
