@@ -130,7 +130,7 @@ export const rateLimiter = async (req, res, next) => {
       req.userId = null;
       console.log(`⚠️ Rate Limiter: No auth header found, treating as guest`);
     }
-
+    
     // Skip rate limiting for specific endpoints
     const exemptPaths = [
       '/download', // File downloads

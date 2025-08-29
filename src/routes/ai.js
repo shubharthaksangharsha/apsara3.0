@@ -1565,4 +1565,144 @@ router.post('/tokens', asyncHandler(async (req, res) => {
   }
 }));
 
+/**
+ * @route POST /api/ai/update-conversation-title
+ * @desc Auto-generate and update conversation title based on content
+ * @access Public (with authentication)
+ */
+router.post('/update-conversation-title', asyncHandler(async (req, res) => {
+  const updateTitleSchema = Joi.object({
+    userId: Joi.string().required(),
+    conversationId: Joi.string().required(),
+    model: Joi.string().default('gemini-2.5-flash'),
+    provider: Joi.string().default('google')
+  });
+
+  const { error, value } = updateTitleSchema.validate(req.body);
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      error: 'Validation failed',
+      details: error.details.map(d => d.message)
+    });
+  }
+
+  const { userId, conversationId, model, provider } = value;
+
+  try {
+    // Verify conversation exists and belongs to user
+    const conversation = await Conversation.findOne({ conversationId, userId });
+    if (!conversation) {
+      return res.status(404).json({
+        success: false,
+        error: 'Conversation not found'
+      });
+    }
+
+    // Get first 3-4 messages from the conversation to understand the topic
+    const messages = await Message.find({
+      conversationId,
+      userId,
+      role: { $in: ['user', 'model'] } // Only user and AI messages
+    })
+    .sort({ messageSequence: 1 })
+    .limit(4); // Get first 4 messages (usually 2 user + 2 AI responses)
+
+    if (messages.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No messages found in conversation'
+      });
+    }
+
+    // Prepare conversation content for AI title generation
+    let conversationContent = '';
+    messages.forEach((msg, index) => {
+      const role = msg.role === 'user' ? 'User' : 'Assistant';
+      const content = msg.content.text || '';
+      conversationContent += `${role}: ${content}\n`;
+    });
+
+    // Create AI prompt for title generation
+    const titlePrompt = `Based on the following conversation, generate a concise, descriptive title (3-6 words maximum) that captures the main topic or question being discussed. The title should be clear, specific, and helpful for identifying the conversation later.
+
+Conversation:
+${conversationContent}
+
+Generate only the title, nothing else. Do not use quotes or extra formatting.`;
+
+    // Generate title using AI
+    const aiResponse = await ProviderManager.generateContent({
+      provider,
+      contents: [{
+        role: 'user',
+        parts: [{ text: titlePrompt }]
+      }],
+      config: {
+        model,
+        temperature: 0.3, // Lower temperature for more consistent results
+        maxOutputTokens: 50, // Short response
+        systemInstruction: 'You are an expert at creating concise, descriptive titles for conversations. Generate titles that are 3-6 words and clearly identify the main topic.'
+      }
+    });
+
+    if (!aiResponse.success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to generate title',
+        details: aiResponse.error
+      });
+    }
+
+    // Clean up the generated title
+    let newTitle = aiResponse.text.trim();
+    
+    // Remove quotes if present
+    newTitle = newTitle.replace(/^["']|["']$/g, '');
+    
+    // Limit length to 100 characters max
+    if (newTitle.length > 100) {
+      newTitle = newTitle.substring(0, 97) + '...';
+    }
+    
+    // Fallback if title is empty or too short
+    if (!newTitle || newTitle.length < 3) {
+      newTitle = 'New Conversation';
+    }
+
+    // Store previous title before updating
+    const previousTitle = conversation.title;
+    
+    // Update conversation title
+    conversation.title = newTitle;
+    await conversation.save();
+
+    // Return success response
+    res.json({
+      success: true,
+      conversationId,
+      previousTitle: previousTitle,
+      newTitle: newTitle,
+      generatedFrom: {
+        messageCount: messages.length,
+        provider,
+        model
+      },
+      usageMetadata: {
+        promptTokenCount: aiResponse.usageMetadata?.promptTokenCount || 0,
+        candidatesTokenCount: aiResponse.usageMetadata?.candidatesTokenCount || 0,
+        totalTokenCount: aiResponse.usageMetadata?.totalTokenCount || 0
+      }
+    });
+
+  } catch (error) {
+    console.error('Update Conversation Title Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error.message
+    });
+  }
+}));
+
 export default router; 
