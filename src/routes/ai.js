@@ -1617,21 +1617,34 @@ router.post('/update-conversation-title', asyncHandler(async (req, res) => {
 
     // Prepare conversation content for AI title generation
     let conversationContent = '';
+    console.log(`📝 Processing ${messages.length} messages for title generation:`);
     messages.forEach((msg, index) => {
       const role = msg.role === 'user' ? 'User' : 'Assistant';
       const content = msg.content.text || '';
+      console.log(`  ${index + 1}. ${role}: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`);
       conversationContent += `${role}: ${content}\n`;
     });
+    console.log(`📄 Total conversation content length: ${conversationContent.length} characters`);
 
-    // Create AI prompt for title generation
-    const titlePrompt = `Based on the following conversation, generate a concise, descriptive title (3-6 words maximum) that captures the main topic or question being discussed. The title should be clear, specific, and helpful for identifying the conversation later.
+    // Create AI prompt for title generation (more specific - 3-4 words max)
+    const titlePrompt = `Based on the following conversation, generate a very concise title (3-4 words MAXIMUM) that captures the main topic or question. The title must be extremely brief but descriptive.
+
+Rules:
+- Maximum 3-4 words only
+- No articles (a, an, the) unless essential
+- Focus on the core topic/action
+- Be specific and clear
+- Do NOT use "New Conversation"
 
 Conversation:
 ${conversationContent}
 
-Generate only the title, nothing else. Do not use quotes or extra formatting.`;
+Generate only the title (3-4 words max), nothing else. No quotes, no extra text.`;
 
-    // Generate title using AI
+    console.log(`🤖 Generating title with prompt (${titlePrompt.length} chars)`);
+    console.log(`🎯 Using model: ${model}, provider: ${provider}, temperature: 0.1`);
+
+    // Generate title using AI with lower temperature
     const aiResponse = await ProviderManager.generateContent({
       provider,
       contents: [{
@@ -1640,13 +1653,14 @@ Generate only the title, nothing else. Do not use quotes or extra formatting.`;
       }],
       config: {
         model,
-        temperature: 0.3, // Lower temperature for more consistent results
-        maxOutputTokens: 50, // Short response
-        systemInstruction: 'You are an expert at creating concise, descriptive titles for conversations. Generate titles that are 3-6 words and clearly identify the main topic.'
+        temperature: 0.1, // Very low temperature for consistent, focused results
+        maxOutputTokens: 20, // Even shorter response for 3-4 words
+        systemInstruction: 'You are an expert at creating ultra-concise 3-4 word titles. Never use "New Conversation". Focus on the main topic only.'
       }
     });
 
     if (!aiResponse.success) {
+      console.error(`❌ AI title generation failed: ${aiResponse.error}`);
       return res.status(500).json({
         success: false,
         error: 'Failed to generate title',
@@ -1654,21 +1668,43 @@ Generate only the title, nothing else. Do not use quotes or extra formatting.`;
       });
     }
 
+    console.log(`✅ AI responded with: "${aiResponse.text}"`);
+    console.log(`📊 Token usage - Input: ${aiResponse.usageMetadata?.promptTokenCount || 0}, Output: ${aiResponse.usageMetadata?.candidatesTokenCount || 0}`);
+
     // Clean up the generated title
     let newTitle = aiResponse.text.trim();
+    console.log(`🧹 After trim: "${newTitle}"`);
     
     // Remove quotes if present
     newTitle = newTitle.replace(/^["']|["']$/g, '');
+    console.log(`🔤 After quote removal: "${newTitle}"`);
     
-    // Limit length to 100 characters max
-    if (newTitle.length > 100) {
-      newTitle = newTitle.substring(0, 97) + '...';
+    // Limit to reasonable length (50 chars for 3-4 words)
+    if (newTitle.length > 50) {
+      newTitle = newTitle.substring(0, 47) + '...';
+      console.log(`✂️ After length limit: "${newTitle}"`);
     }
     
-    // Fallback if title is empty or too short
-    if (!newTitle || newTitle.length < 3) {
-      newTitle = 'New Conversation';
+    // Improved fallback - use first user message content for better titles
+    if (!newTitle || newTitle.length < 3 || newTitle.toLowerCase().includes('new conversation')) {
+      console.log(`⚠️ Title too short or invalid: "${newTitle}"`);
+      // Try to extract topic from first user message
+      const firstUserMessage = messages.find(msg => msg.role === 'user');
+      if (firstUserMessage && firstUserMessage.content.text) {
+        const userText = firstUserMessage.content.text.trim();
+        const words = userText.split(' ').slice(0, 3); // Take first 3 words
+        newTitle = words.join(' ');
+        if (newTitle.length > 30) {
+          newTitle = newTitle.substring(0, 27) + '...';
+        }
+        console.log(`🔄 Fallback title from user message: "${newTitle}"`);
+      } else {
+        newTitle = 'Chat Session';
+        console.log(`🆘 Ultimate fallback: "${newTitle}"`);
+      }
     }
+
+    console.log(`🎯 Final title: "${newTitle}"`);
 
     // Store previous title before updating
     const previousTitle = conversation.title;
@@ -1676,6 +1712,8 @@ Generate only the title, nothing else. Do not use quotes or extra formatting.`;
     // Update conversation title
     conversation.title = newTitle;
     await conversation.save();
+
+    console.log(`🎉 Title update successful: "${previousTitle}" → "${newTitle}" for conversation ${conversationId}`);
 
     // Return success response
     res.json({
