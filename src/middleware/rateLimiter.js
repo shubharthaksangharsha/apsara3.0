@@ -112,6 +112,7 @@ export const rateLimiter = async (req, res, next) => {
       '/download', // File downloads
       '/api/conversations', // Loading conversations and messages
       '/api/files/', // Followed by fileId/download
+      '/api/files/upload-limits', // Upload limits checking (read-only)
     ];
 
     // Check if this request should be exempted
@@ -124,6 +125,9 @@ export const rateLimiter = async (req, res, next) => {
       }
       if (path === '/api/files/') {
         return req.path.startsWith('/api/files/') && req.path.endsWith('/download');
+      }
+      if (path === '/api/files/upload-limits') {
+        return req.path === '/api/files/upload-limits' && req.method === 'GET';
       }
       return req.path.includes(path);
     });
