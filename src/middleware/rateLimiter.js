@@ -1,5 +1,6 @@
 import { RateLimiterMemory } from 'rate-limiter-flexible';
 import dotenv from 'dotenv';
+import User from '../models/User.js';
 
 dotenv.config();
 
@@ -26,11 +27,24 @@ const rateLimiters = {
     duration: 60 * 60, // per hour
   }),
 
-  // File upload rate limiting (only for uploads, not downloads)
+  // File upload rate limiting (legacy IP-based for fallback)
   fileUpload: new RateLimiterMemory({
     keyGenerator: (req) => req.ip,
     points: 100, // 100 uploads
     duration: 60 * 60, // per hour
+  }),
+
+  // User-based file upload rate limiters by subscription plan
+  fileUploadGuest: new RateLimiterMemory({
+    keyGenerator: (req) => req.userId || req.ip,
+    points: 0, // 0 uploads per day for guests
+    duration: 24 * 60 * 60, // 24 hours
+  }),
+
+  fileUploadFree: new RateLimiterMemory({
+    keyGenerator: (req) => req.userId || req.ip,
+    points: 5, // 5 uploads per day for free users
+    duration: 24 * 60 * 60, // 24 hours
   }),
 
   // Authentication rate limiting
@@ -48,8 +62,51 @@ const rateLimiters = {
   })
 };
 
+// Helper function to get user subscription plan
+const getUserSubscriptionPlan = async (userId) => {
+  try {
+    if (!userId) return 'guest';
+    const user = await User.findById(userId);
+    return user?.subscriptionPlan || 'guest';
+  } catch (error) {
+    console.error('Error fetching user subscription plan:', error);
+    return 'guest';
+  }
+};
+
+// Helper function to get file upload rate limiter based on subscription plan
+const getFileUploadLimiter = async (req) => {
+  const subscriptionPlan = await getUserSubscriptionPlan(req.userId);
+  
+  switch (subscriptionPlan) {
+    case 'guest':
+      return rateLimiters.fileUploadGuest;
+    case 'free':
+      return rateLimiters.fileUploadFree;
+    case 'premium':
+    case 'enterprise':
+      return null; // Unlimited uploads for premium and enterprise
+    default:
+      return rateLimiters.fileUploadFree; // Default to free tier
+  }
+};
+
 export const rateLimiter = async (req, res, next) => {
   try {
+    // Extract userId from Authorization header for user-based rate limiting
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.substring(7);
+        const jwt = await import('jsonwebtoken');
+        const decoded = jwt.default.verify(token, process.env.JWT_SECRET);
+        req.userId = decoded.userId || decoded.id;
+      } catch (error) {
+        // Invalid token, treat as guest
+        req.userId = null;
+      }
+    }
+
     // Skip rate limiting for specific endpoints
     const exemptPaths = [
       '/download', // File downloads
@@ -78,6 +135,7 @@ export const rateLimiter = async (req, res, next) => {
 
     // Choose the appropriate rate limiter based on the endpoint
     let limiter = rateLimiters.api;
+    let keyOverride = null;
     
     // AI generation endpoints (generate, regenerate, edit)
     if (req.path.includes('/generate') || 
@@ -86,10 +144,16 @@ export const rateLimiter = async (req, res, next) => {
         req.path.startsWith('/api/ai')) {
       limiter = rateLimiters.ai;
     }
-    // File upload endpoints (not downloads)
+    // File upload endpoints (not downloads) - Use user-based rate limiting
     else if (req.path.startsWith('/api/files') && 
              (req.method === 'POST' || req.path.includes('upload'))) {
-      limiter = rateLimiters.fileUpload;
+      limiter = await getFileUploadLimiter(req);
+      
+      // If limiter is null (premium/enterprise), skip rate limiting
+      if (!limiter) {
+        console.log(`File upload rate limit exempted for premium/enterprise user: ${req.userId || req.ip}`);
+        return next();
+      }
     }
     // Authentication endpoints
     else if (req.path.includes('/auth') || 
@@ -103,7 +167,9 @@ export const rateLimiter = async (req, res, next) => {
       limiter = rateLimiters.messageOperations;
     }
 
-    await limiter.consume(req.ip);
+    // Use appropriate key for rate limiting
+    const key = keyOverride || (limiter.keyGenerator ? limiter.keyGenerator(req) : req.ip);
+    await limiter.consume(key);
     next();
   } catch (rejRes) {
     const totalHits = rejRes.totalTime || 0;
@@ -116,7 +182,7 @@ export const rateLimiter = async (req, res, next) => {
       'X-RateLimit-Reset': new Date(Date.now() + rejRes.msBeforeNext)
     });
 
-    console.error(`Rate limit exceeded for: ${req.method} ${req.path} from ${req.ip}`);
+    console.error(`Rate limit exceeded for: ${req.method} ${req.path} from ${req.userId || req.ip}`);
 
     const error = new Error('Too many requests, please try again later');
     error.name = 'TooManyRequestsError';
@@ -156,5 +222,78 @@ export const getRemainingPoints = async (ip, limiterType = 'api') => {
   } catch (error) {
     console.error('Error getting remaining points:', error);
     return null;
+  }
+};
+
+// Get file upload rate limit information for a user
+export const getFileUploadLimitInfo = async (userId) => {
+  try {
+    const subscriptionPlan = await getUserSubscriptionPlan(userId);
+    
+    // Premium and Enterprise have unlimited uploads
+    if (subscriptionPlan === 'premium' || subscriptionPlan === 'enterprise') {
+      return {
+        canUpload: true,
+        used: 0,
+        limit: -1, // -1 indicates unlimited
+        retryAfterSeconds: null,
+        message: `Unlimited uploads for ${subscriptionPlan} users`,
+        subscriptionPlan
+      };
+    }
+    
+    // Get the appropriate limiter
+    const limiter = await getFileUploadLimiter({ userId });
+    if (!limiter) {
+      // This shouldn't happen but handle gracefully
+      return {
+        canUpload: true,
+        used: 0,
+        limit: -1,
+        retryAfterSeconds: null,
+        message: 'Unlimited uploads',
+        subscriptionPlan
+      };
+    }
+    
+    // Get current usage
+    const key = userId || 'guest';
+    const resRateLimiter = await limiter.get(key);
+    
+    const limit = limiter.points;
+    const used = resRateLimiter ? (limit - resRateLimiter.remainingPoints) : 0;
+    const remaining = resRateLimiter ? resRateLimiter.remainingPoints : limit;
+    const canUpload = remaining > 0;
+    const retryAfterSeconds = resRateLimiter && !canUpload ? 
+      Math.round(resRateLimiter.msBeforeNext / 1000) : null;
+    
+    let message;
+    if (subscriptionPlan === 'guest') {
+      message = 'Guests cannot upload files. Please sign up for a free account.';
+    } else if (canUpload) {
+      message = `${remaining} uploads remaining today`;
+    } else {
+      const hoursUntilReset = Math.ceil((retryAfterSeconds || 0) / 3600);
+      message = `Daily upload limit reached. Resets in ${hoursUntilReset} hour${hoursUntilReset !== 1 ? 's' : ''}`;
+    }
+    
+    return {
+      canUpload,
+      used,
+      limit,
+      retryAfterSeconds,
+      message,
+      subscriptionPlan
+    };
+  } catch (error) {
+    console.error('Error getting file upload limit info:', error);
+    return {
+      canUpload: false,
+      used: 0,
+      limit: 0,
+      retryAfterSeconds: null,
+      message: 'Error checking upload limits',
+      subscriptionPlan: 'unknown'
+    };
   }
 };

@@ -6,6 +6,8 @@ import { promises as fs } from 'fs';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import ProviderManager from '../providers/ProviderManager.js';
 import File from '../models/File.js';
+import { getFileUploadLimitInfo } from '../middleware/rateLimiter.js';
+import authMiddleware from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -196,6 +198,36 @@ function determineOptimalStorage(files, options = {}) {
     preference: preference
   };
 }
+
+/**
+ * @route GET /api/files/upload-limits
+ * @desc Check file upload rate limits for the current user
+ * @access Public (optional auth)
+ */
+router.get('/upload-limits', asyncHandler(async (req, res) => {
+  // Extract userId from token if provided, otherwise treat as guest
+  let userId = null;
+  const authHeader = req.headers.authorization;
+  
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.substring(7);
+      const jwt = await import('jsonwebtoken');
+      const decoded = jwt.default.verify(token, process.env.JWT_SECRET);
+      userId = decoded.userId || decoded.id;
+    } catch (error) {
+      // Invalid token, treat as guest
+      userId = null;
+    }
+  }
+  
+  const limitInfo = await getFileUploadLimitInfo(userId);
+  
+  res.json({
+    success: true,
+    data: limitInfo
+  });
+}));
 
 /**
  * @route POST /api/files/upload
