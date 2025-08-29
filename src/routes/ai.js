@@ -1653,8 +1653,8 @@ Generate only the title (3-4 words max), nothing else. No quotes, no extra text.
       }],
       config: {
         model,
-        temperature: 0.1, // Very low temperature for consistent, focused results
-        maxOutputTokens: 20, // Even shorter response for 3-4 words
+        temperature: 0.0, // Very low temperature for consistent, focused results
+        maxOutputTokens: 100, // Even shorter response for 3-4 words
         systemInstruction: 'You are an expert at creating ultra-concise 3-4 word titles. Never use "New Conversation". Focus on the main topic only.'
       }
     });
