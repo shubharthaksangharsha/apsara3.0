@@ -1627,22 +1627,15 @@ router.post('/update-conversation-title', asyncHandler(async (req, res) => {
     console.log(`📄 Total conversation content length: ${conversationContent.length} characters`);
 
     // Create AI prompt for title generation (more specific - 3-4 words max)
-    const titlePrompt = `Based on the following conversation, generate a very concise title (3-4 words MAXIMUM) that captures the main topic or question. The title must be extremely brief but descriptive.
-
-Rules:
-- Maximum 3-4 words only
-- No articles (a, an, the) unless essential
-- Focus on the core topic/action
-- Be specific and clear
-- Do NOT use "New Conversation"
+    const titlePrompt = `Generate a 3-4 word title for this conversation. Be concise but descriptive.
 
 Conversation:
 ${conversationContent}
 
-Generate only the title (3-4 words max), nothing else. No quotes, no extra text.`;
+Title (3-4 words only):`;
 
     console.log(`🤖 Generating title with prompt (${titlePrompt.length} chars)`);
-    console.log(`🎯 Using model: ${model}, provider: ${provider}, temperature: 0.1`);
+    console.log(`🎯 Using model: ${model}, provider: ${provider}, temperature: 0.3`);
 
     // Generate title using AI with lower temperature
     const aiResponse = await ProviderManager.generateContent({
@@ -1653,9 +1646,9 @@ Generate only the title (3-4 words max), nothing else. No quotes, no extra text.
       }],
       config: {
         model,
-        temperature: 0.0, // Very low temperature for consistent, focused results
-        maxOutputTokens: 100, // Even shorter response for 3-4 words
-        systemInstruction: 'You are an expert at creating ultra-concise 3-4 word titles. Never use "New Conversation". Focus on the main topic only.'
+        temperature: 0.3, // Slightly higher temperature for better creativity
+        maxOutputTokens: 30, // Shorter response for 3-4 words
+        systemInstruction: 'Create concise 3-4 word conversation titles. Focus on the main topic.'
       }
     });
 
