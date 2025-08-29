@@ -107,6 +107,10 @@ const getFileUploadLimiter = async (req) => {
 };
 
 export const rateLimiter = async (req, res, next) => {
+  // Define these outside try block to avoid scope issues
+  let limiter = rateLimiters.api;
+  let key = req.ip; // Default to IP
+  
   try {
     // Extract userId from Authorization header for user-based rate limiting
     const authHeader = req.headers.authorization;
@@ -158,9 +162,6 @@ export const rateLimiter = async (req, res, next) => {
     }
 
     // Choose the appropriate rate limiter based on the endpoint
-    let limiter = rateLimiters.api;
-    let keyOverride = null;
-    
     console.log(`🎯 Rate Limiter: Processing ${req.method} ${req.path} for user ${req.userId || 'guest'}`);
     
     // AI generation endpoints (generate, regenerate, edit)
@@ -169,6 +170,7 @@ export const rateLimiter = async (req, res, next) => {
         req.path.includes('/edit') ||
         req.path.startsWith('/api/ai')) {
       limiter = rateLimiters.ai;
+      key = req.ip; // Use IP for AI endpoints
       console.log(`🤖 Rate Limiter: Using AI rate limiter`);
     }
     // File upload endpoints (not downloads) - Use user-based rate limiting
@@ -192,6 +194,8 @@ export const rateLimiter = async (req, res, next) => {
         console.log(`✅ File upload rate limit exempted for premium/enterprise user: ${req.userId || req.ip}`);
         return next();
       } else {
+        // Use userId as key for file uploads, fallback to IP for guests
+        key = req.userId || req.ip;
         console.log(`🔒 File upload rate limiter applied for user: ${req.userId || req.ip}`);
       }
     }
@@ -200,16 +204,22 @@ export const rateLimiter = async (req, res, next) => {
              req.path.includes('/login') || 
              req.path.includes('/register')) {
       limiter = rateLimiters.auth;
+      key = req.ip; // Use IP for auth endpoints
     }
     // Message operations (send, edit, delete messages)
     else if (req.path.includes('/messages') && 
              (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE')) {
       limiter = rateLimiters.messageOperations;
+      key = req.ip; // Use IP for message operations
     }
 
-    // Use appropriate key for rate limiting
-    const key = keyOverride || (limiter.keyGenerator ? limiter.keyGenerator(req) : req.ip);
     console.log(`🔑 Rate Limiter: Using key '${key}' for ${req.method} ${req.path}`);
+    
+    // Debug rate limit state before consuming
+    if (req.path.startsWith('/api/files') && req.method === 'POST') {
+      await debugRateLimit(req.userId, req.ip);
+    }
+    
     await limiter.consume(key);
     console.log(`✅ Rate Limiter: Request allowed for key '${key}'`);
     next();
@@ -226,7 +236,7 @@ export const rateLimiter = async (req, res, next) => {
 
     console.error(`❌ Rate limit exceeded for: ${req.method} ${req.path} from ${req.userId || req.ip}`);
     console.error(`   Limiter details: points=${rejRes.points}, remaining=${rejRes.remainingPoints}, retryAfter=${timeRemaining}s`);
-    console.error(`   Key used: ${keyOverride || (limiter.keyGenerator ? limiter.keyGenerator(req) : req.ip)}`);
+    console.error(`   Key used: ${key}`);
 
     const error = new Error('Too many requests, please try again later');
     error.name = 'TooManyRequestsError';
@@ -283,6 +293,27 @@ export const clearUserRateLimit = async (userId) => {
     console.log(`✅ Rate Limiter: Cleared rate limit state for user ${userId}`);
   } catch (error) {
     console.error(`❌ Rate Limiter: Error clearing rate limit state for user ${userId}:`, error);
+  }
+};
+
+// Debug function to check rate limit state
+export const debugRateLimit = async (userId, ip) => {
+  try {
+    console.log(`🔍 Debug Rate Limit State for userId: ${userId}, ip: ${ip}`);
+    
+    if (userId) {
+      const guestState = await rateLimiters.fileUploadGuest.get(userId);
+      const freeState = await rateLimiters.fileUploadFree.get(userId);
+      
+      console.log(`  Guest limiter state: ${guestState ? `${guestState.remainingPoints}/${rateLimiters.fileUploadGuest.points}` : 'no state'}`);
+      console.log(`  Free limiter state: ${freeState ? `${freeState.remainingPoints}/${rateLimiters.fileUploadFree.points}` : 'no state'}`);
+    }
+    
+    const ipState = await rateLimiters.fileUpload.get(ip);
+    console.log(`  IP limiter state: ${ipState ? `${ipState.remainingPoints}/${rateLimiters.fileUpload.points}` : 'no state'}`);
+    
+  } catch (error) {
+    console.error(`❌ Debug Rate Limit error:`, error);
   }
 };
 
