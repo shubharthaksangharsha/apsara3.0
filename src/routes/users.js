@@ -7,6 +7,7 @@ import emailService from '../services/emailService.js';
 import Joi from 'joi';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
+import { clearUserRateLimit } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -1049,6 +1050,11 @@ router.put('/:userId/subscription', authMiddleware, async (req, res) => {
 
     // Update usage tracking for new plan
     await UserUsage.findOrCreateUsage(userId, subscriptionPlan);
+
+    // Clear any existing rate limit state when upgrading to premium/enterprise
+    if (subscriptionPlan === 'premium' || subscriptionPlan === 'enterprise') {
+      await clearUserRateLimit(userId);
+    }
 
     console.log(`📈 User subscription upgraded: ${user.email} from ${previousPlan} to ${subscriptionPlan}`);
 
