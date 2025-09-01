@@ -85,7 +85,7 @@ const generateSchema = Joi.object({
   provider: Joi.string().default('google'),
   config: Joi.object({
     temperature: Joi.number().min(0).max(2).default(0.7),
-    maxOutputTokens: Joi.number().min(1).max(8192).default(2048),
+    maxOutputTokens: Joi.number().min(1).max(65536).default(2048),
     topP: Joi.number().min(0).max(1),
     topK: Joi.number().min(1).max(40),
     systemInstruction: Joi.string(),
@@ -130,7 +130,7 @@ const regenerateSchema = Joi.object({
   provider: Joi.string().default('google'),
   config: Joi.object({
     temperature: Joi.number().min(0).max(2).default(0.7),
-    maxOutputTokens: Joi.number().min(1).max(8192).default(2048),
+    maxOutputTokens: Joi.number().min(1).max(65536).default(2048),
     topP: Joi.number().min(0).max(1),
     topK: Joi.number().min(1).max(40),
     systemInstruction: Joi.string(),
@@ -824,7 +824,7 @@ router.post('/edit-message', asyncHandler(async (req, res) => {
     provider: Joi.string().default('google'),
     config: Joi.object({
       temperature: Joi.number().min(0).max(2).default(0.7),
-      maxOutputTokens: Joi.number().min(1).max(8192).default(2048),
+      maxOutputTokens: Joi.number().min(1).max(65536).default(2048),
       topP: Joi.number().min(0).max(1),
       topK: Joi.number().min(1).max(40),
       thinkingConfig: Joi.object({
@@ -1566,78 +1566,6 @@ router.post('/tokens', asyncHandler(async (req, res) => {
 }));
 
 /**
- * @route POST /api/ai/stop-generation
- * @desc Stop AI generation for a user's conversation
- * @access Public (with authentication)
- */
-router.post('/stop-generation', asyncHandler(async (req, res) => {
-  const stopGenerationSchema = Joi.object({
-    userId: Joi.string().required(),
-    conversationId: Joi.string().required()
-  });
-
-  const { error, value } = stopGenerationSchema.validate(req.body);
-  if (error) {
-    return res.status(400).json({
-      success: false,
-      error: 'Validation failed',
-      details: error.details.map(d => d.message)
-    });
-  }
-
-  const { userId, conversationId } = value;
-
-  try {
-    // Verify conversation exists and belongs to user
-    const conversation = await Conversation.findOne({ conversationId, userId });
-    if (!conversation) {
-      return res.status(404).json({
-        success: false,
-        error: 'Conversation not found'
-      });
-    }
-
-    // Find the most recent message that's still being generated
-    const lastMessage = await Message.findOne({
-      conversationId,
-      userId,
-      role: 'model',
-      status: { $in: ['processing', 'streaming'] }
-    }).sort({ messageSequence: -1 });
-
-    if (lastMessage) {
-      // Mark the message as stopped
-      lastMessage.status = 'stopped';
-      lastMessage.metadata = lastMessage.metadata || {};
-      lastMessage.metadata.stoppedAt = new Date();
-      lastMessage.metadata.stoppedBy = 'user';
-      await lastMessage.save();
-
-      return res.json({
-        success: true,
-        message: 'Generation stopped successfully',
-        stoppedMessageId: lastMessage.messageId,
-        conversationId
-      });
-    } else {
-      return res.json({
-        success: true,
-        message: 'No active generation found to stop',
-        conversationId
-      });
-    }
-
-  } catch (error) {
-    console.error('Stop Generation Error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-      details: error.message
-    });
-  }
-}));
-
-/**
  * @route POST /api/ai/update-conversation-title
  * @desc Auto-generate and update conversation title based on content
  * @access Public (with authentication)
@@ -1694,26 +1622,10 @@ router.post('/update-conversation-title', asyncHandler(async (req, res) => {
       const content = msg.content.text || '';
       conversationContent += `${role}: ${content}\n`;
     });
-    console.log('conversationContent: ', conversationContent);
-    console.log('messages: ', messages);
-    console.log('messages.length: ', messages.length);
+
     // Create AI prompt for title generation
-    const titlePrompt = `Based on the following conversation, generate a concise, descriptive title (3-5 words maximum) that captures the main topic or question being discussed. The title should be clear, specific, and helpful for identifying the conversation later.
-    Example:
-    - "Python Code Help"
-    - "React State Issue"
-    - "Database Query Fix"
-    - "Math Problem Solve"
-    - "AI Model Training"
-    - "Data Analysis"
-    - "Web Development"
-    - "Mobile App Development"
-    - "UI/UX Design"
-    - "SEO Optimization"
-    - "Social Media Marketing"
-    - "Email Marketing"
-    - "Greeting User"
-    - "Help with Project"
+    const titlePrompt = `Based on the following conversation, generate a concise, descriptive title (3-6 words maximum) that captures the main topic or question being discussed. The title should be clear, specific, and helpful for identifying the conversation later.
+
 Conversation:
 ${conversationContent}
 
@@ -1728,9 +1640,9 @@ Generate only the title, nothing else. Do not use quotes or extra formatting.`;
       }],
       config: {
         model,
-        temperature: 0.1, // Lower temperature for more consistent results
-        maxOutputTokens: 1024, // Short response
-        systemInstruction: 'You are an expert at creating concise, descriptive titles for conversations. Generate titles that are 3-5words and clearly identify the main topic.'
+        temperature: 0.3, // Lower temperature for more consistent results
+        maxOutputTokens: 50, // Short response
+        systemInstruction: 'You are an expert at creating concise, descriptive titles for conversations. Generate titles that are 3-6 words and clearly identify the main topic.'
       }
     });
 
@@ -1741,7 +1653,6 @@ Generate only the title, nothing else. Do not use quotes or extra formatting.`;
         details: aiResponse.error
       });
     }
-    console.log('new title: ', aiResponse.text);
 
     // Clean up the generated title
     let newTitle = aiResponse.text.trim();
@@ -1756,7 +1667,6 @@ Generate only the title, nothing else. Do not use quotes or extra formatting.`;
     
     // Fallback if title is empty or too short
     if (!newTitle || newTitle.length < 3) {
-      console.log('newTitle is empty or too short, using default title');
       newTitle = 'New Conversation';
     }
 
