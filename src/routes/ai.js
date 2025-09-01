@@ -1566,6 +1566,78 @@ router.post('/tokens', asyncHandler(async (req, res) => {
 }));
 
 /**
+ * @route POST /api/ai/stop-generation
+ * @desc Stop AI generation for a user's conversation
+ * @access Public (with authentication)
+ */
+router.post('/stop-generation', asyncHandler(async (req, res) => {
+  const stopGenerationSchema = Joi.object({
+    userId: Joi.string().required(),
+    conversationId: Joi.string().required()
+  });
+
+  const { error, value } = stopGenerationSchema.validate(req.body);
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      error: 'Validation failed',
+      details: error.details.map(d => d.message)
+    });
+  }
+
+  const { userId, conversationId } = value;
+
+  try {
+    // Verify conversation exists and belongs to user
+    const conversation = await Conversation.findOne({ conversationId, userId });
+    if (!conversation) {
+      return res.status(404).json({
+        success: false,
+        error: 'Conversation not found'
+      });
+    }
+
+    // Find the most recent message that's still being generated
+    const lastMessage = await Message.findOne({
+      conversationId,
+      userId,
+      role: 'model',
+      status: { $in: ['processing', 'streaming'] }
+    }).sort({ messageSequence: -1 });
+
+    if (lastMessage) {
+      // Mark the message as stopped
+      lastMessage.status = 'stopped';
+      lastMessage.metadata = lastMessage.metadata || {};
+      lastMessage.metadata.stoppedAt = new Date();
+      lastMessage.metadata.stoppedBy = 'user';
+      await lastMessage.save();
+
+      return res.json({
+        success: true,
+        message: 'Generation stopped successfully',
+        stoppedMessageId: lastMessage.messageId,
+        conversationId
+      });
+    } else {
+      return res.json({
+        success: true,
+        message: 'No active generation found to stop',
+        conversationId
+      });
+    }
+
+  } catch (error) {
+    console.error('Stop Generation Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      details: error.message
+    });
+  }
+}));
+
+/**
  * @route POST /api/ai/update-conversation-title
  * @desc Auto-generate and update conversation title based on content
  * @access Public (with authentication)
