@@ -297,6 +297,8 @@ export class LiveApiServer {
    */
   async handleCreateSession(clientId, message) {
     try {
+      console.log(`📥 Received create_session message:`, JSON.stringify(message, null, 2));
+      
       const {
         model = 'gemini-2.0-flash-live-001',
         provider = 'google',
@@ -426,26 +428,36 @@ export class LiveApiServer {
         }
       };
 
-      // Enhanced config with session management features
+      // Enhanced config with only essential features (keep it minimal to avoid invalid arguments)
       const enhancedConfig = {
-        ...config,
-        // Enable session resumption if not explicitly disabled
-        ...(resumeHandle && { sessionResumption: { handle: resumeHandle } }),
-        ...(!resumeHandle && { sessionResumption: {} }),
-        // Enable context window compression for longer sessions
-        contextWindowCompression: config.contextWindowCompression || { slidingWindow: {} },
-        // Audio transcription settings (only output supported)
-        ...(config.responseModalities?.includes('AUDIO') && {
-          outputAudioTranscription: config.outputAudioTranscription || {}
-        })
+        ...config
+        // Only add session resumption if we have a handle
+        // ...(resumeHandle && { sessionResumption: { handle: resumeHandle } })
+        // Remove other potentially problematic settings for now
       };
 
-      const liveSession = await ProviderManager.createLiveSession({
-        model,
-        provider,
-        config: enhancedConfig,
-        callbacks: sessionCallbacks
-      });
+      console.log(`🔧 Enhanced config being sent to Gemini:`, JSON.stringify(enhancedConfig, null, 2));
+      
+      let liveSession;
+      try {
+        liveSession = await ProviderManager.createLiveSession({
+          model,
+          provider,
+          config: enhancedConfig,
+          callbacks: sessionCallbacks
+        });
+
+        console.log(`🎯 Live session created successfully:`, {
+          success: liveSession.success,
+          provider: liveSession.provider,
+          model: liveSession.model,
+          sessionId: liveSession.sessionId
+        });
+      } catch (sessionError) {
+        console.error(`❌ Failed to create Live session with Gemini:`, sessionError);
+        console.error(`❌ Session error details:`, sessionError.message);
+        throw new Error(`Failed to create Live session: ${sessionError.message}`);
+      }
 
       const geminiSessionId = liveSession.session?.id || 'N/A';
       
@@ -550,6 +562,7 @@ export class LiveApiServer {
         geminiSessionId: geminiSessionId
       });
 
+      console.log(`🚀 Sending session_created message to client ${clientId}`);
       this.sendToClient(clientId, {
         type: 'session_created',
         sessionId: finalSessionId,
@@ -559,9 +572,12 @@ export class LiveApiServer {
         conversationId: finalConversationId,
         timestamp: new Date().toISOString()
       });
+      
+      console.log(`✅ Session creation completed successfully for ${finalSessionId}`);
 
     } catch (error) {
-      console.error('Create session error:', error);
+      console.error('❌ Create session error:', error);
+      console.error('❌ Error stack:', error.stack);
       this.sendError(clientId, `Failed to create session: ${error.message}`);
     }
   }

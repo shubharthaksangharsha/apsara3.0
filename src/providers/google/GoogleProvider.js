@@ -186,23 +186,33 @@ export class GoogleProvider extends BaseProvider {
       // Sanitize config to only include valid Live API parameters
       const validConfig = {};
       
-      // Add valid configuration properties
-      if (config.responseModalities) validConfig.responseModalities = config.responseModalities;
-      if (config.systemInstruction) validConfig.systemInstruction = config.systemInstruction;
-      if (config.tools) validConfig.tools = config.tools;
-      if (config.speechConfig) validConfig.speechConfig = config.speechConfig;
-      if (config.sessionResumption) validConfig.sessionResumption = config.sessionResumption;
-      if (config.contextWindowCompression) validConfig.contextWindowCompression = config.contextWindowCompression;
-      if (config.outputAudioTranscription) validConfig.outputAudioTranscription = config.outputAudioTranscription;
+      // Add only essential configuration properties
+      if (config.responseModalities) {
+        validConfig.responseModalities = config.responseModalities;
+      }
       
-      // Handle realtimeInputConfig properly - mediaResolution should be inside it if provided
-      if (config.realtimeInputConfig) {
-        validConfig.realtimeInputConfig = config.realtimeInputConfig;
-      } else if (config.mediaResolution) {
-        // Move mediaResolution to the correct location
-        validConfig.realtimeInputConfig = {
-          mediaResolution: config.mediaResolution
-        };
+      if (config.speechConfig) {
+        // Clean up speechConfig structure - remove nested voiceConfig
+        const speechConfig = {};
+        if (config.speechConfig.voiceConfig?.prebuiltVoiceConfig?.voiceName) {
+          speechConfig.voiceName = config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName;
+        }
+        if (config.speechConfig.languageCode) {
+          speechConfig.languageCode = config.speechConfig.languageCode;
+        }
+        if (Object.keys(speechConfig).length > 0) {
+          validConfig.speechConfig = speechConfig;
+        }
+      }
+      
+      if (config.outputAudioTranscription) {
+        validConfig.outputAudioTranscription = config.outputAudioTranscription;
+      }
+      
+      // Only include other properties if they're actually needed
+      if (config.systemInstruction) validConfig.systemInstruction = config.systemInstruction;
+      if (config.tools && Array.isArray(config.tools) && config.tools.length > 0) {
+        validConfig.tools = config.tools;
       }
       
       const session = await this.client.live.connect({
