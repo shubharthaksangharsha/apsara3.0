@@ -748,12 +748,17 @@ export class LiveApiServer {
             sessionId: sessionId
           };
 
-          await LiveConversationService.saveLiveMessageToConversation(
-            sessionInfo.conversationId,
-            sessionId,
-            userMessage
-          );
-          console.log(`💾 Saved user message to conversation ${sessionInfo.conversationId}`);
+          // Buffer user message instead of saving immediately
+          const sessionData = this.clients.get(clientId)?.sessions?.get(sessionId);
+          if (sessionData) {
+            sessionData.messageBuffer.push({
+              conversationId: sessionInfo.conversationId,
+              sessionId: sessionId,
+              response: userMessage,
+              timestamp: new Date()
+            });
+            console.log(`📦 Buffered user message (${sessionData.messageBuffer.length} messages pending)`);
+          }
         } catch (saveError) {
           console.error('Error saving user message to conversation:', saveError);
         }
