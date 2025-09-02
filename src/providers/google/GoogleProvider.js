@@ -192,14 +192,23 @@ export class GoogleProvider extends BaseProvider {
       }
       
       if (config.speechConfig) {
-        // Clean up speechConfig structure - remove nested voiceConfig
+        // Keep the proper nested speechConfig structure as required by Gemini Live API
         const speechConfig = {};
+        
+        // Handle voice configuration - keep the nested structure
         if (config.speechConfig.voiceConfig?.prebuiltVoiceConfig?.voiceName) {
-          speechConfig.voiceName = config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName;
+          speechConfig.voiceConfig = {
+            prebuiltVoiceConfig: {
+              voiceName: config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName
+            }
+          };
         }
+        
+        // Handle language configuration
         if (config.speechConfig.languageCode) {
           speechConfig.languageCode = config.speechConfig.languageCode;
         }
+        
         if (Object.keys(speechConfig).length > 0) {
           validConfig.speechConfig = speechConfig;
         }
@@ -214,6 +223,8 @@ export class GoogleProvider extends BaseProvider {
       if (config.tools && Array.isArray(config.tools) && config.tools.length > 0) {
         validConfig.tools = config.tools;
       }
+      
+      console.log(`🔧 Final validConfig being sent to Gemini Live API:`, JSON.stringify(validConfig, null, 2));
       
       const session = await this.client.live.connect({
         model,
