@@ -214,8 +214,8 @@ export class GoogleProvider extends BaseProvider {
         }
       }
       
-      // Only include outputAudioTranscription if it's explicitly configured and not empty
-      if (config.outputAudioTranscription && Object.keys(config.outputAudioTranscription).length > 0) {
+      // Include outputAudioTranscription if present (even if empty object - this enables it)
+      if (config.outputAudioTranscription !== undefined) {
         validConfig.outputAudioTranscription = config.outputAudioTranscription;
       }
       
