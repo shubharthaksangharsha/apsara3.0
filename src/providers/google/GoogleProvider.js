@@ -214,7 +214,8 @@ export class GoogleProvider extends BaseProvider {
         }
       }
       
-      if (config.outputAudioTranscription) {
+      // Only include outputAudioTranscription if it's explicitly configured and not empty
+      if (config.outputAudioTranscription && Object.keys(config.outputAudioTranscription).length > 0) {
         validConfig.outputAudioTranscription = config.outputAudioTranscription;
       }
       
@@ -225,6 +226,8 @@ export class GoogleProvider extends BaseProvider {
       }
       
       console.log(`🔧 Final validConfig being sent to Gemini Live API:`, JSON.stringify(validConfig, null, 2));
+      console.log(`🔧 Model being used:`, model);
+      console.log(`🔧 Full connect parameters:`, JSON.stringify({ model, config: validConfig }, null, 2));
       
       const session = await this.client.live.connect({
         model,

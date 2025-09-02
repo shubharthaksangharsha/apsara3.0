@@ -329,11 +329,13 @@ export class LiveApiServer {
       // Create live session with provider
       const sessionCallbacks = {
         onopen: () => {
+          console.log(`🟢 Live session opened for client ${clientId}, session ${finalSessionId}`);
           this.sendToClient(clientId, {
             type: 'session_opened',
             sessionId: finalSessionId,
             timestamp: new Date().toISOString()
           });
+          console.log(`📤 Sent session_opened message to client ${clientId}`);
         },
         
         onmessage: async (response) => {
@@ -403,6 +405,7 @@ export class LiveApiServer {
         },
         
         onerror: (error) => {
+          console.error(`🔴 Live session error for ${finalSessionId}:`, error);
           this.sendToClient(clientId, {
             type: 'session_error',
             sessionId: finalSessionId,
@@ -413,6 +416,18 @@ export class LiveApiServer {
         
         onclose: (reason) => {
           console.log(`🔴 Live session closing - sessionId: ${finalSessionId}, reason:`, reason);
+          
+          // Check if this was an immediate close after creation (indicating config error)
+          if (reason && reason.code === 1007) {
+            console.error(`❌ Session closed with code 1007 (invalid argument) - config issue detected`);
+            console.error(`❌ Close reason:`, reason.reason || 'No specific reason provided');
+            
+            // Try to decode the close message buffer for more details
+            if (reason._closeMessage && Buffer.isBuffer(reason._closeMessage)) {
+              const errorMessage = reason._closeMessage.toString('utf8');
+              console.error(`❌ Detailed error message from Gemini:`, errorMessage);
+            }
+          }
           
           this.sendToClient(clientId, {
             type: 'session_closed',
