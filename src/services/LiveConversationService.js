@@ -306,6 +306,8 @@ export class LiveConversationService {
       let liveContent = {};
 
       // Process different types of Live API messages
+      console.log('🔍 Processing Live message structure:', JSON.stringify(liveMessage, null, 2));
+      
       if (liveMessage.text) {
         // Text message
         content.text = liveMessage.text;
@@ -313,20 +315,56 @@ export class LiveConversationService {
       }
       
       if (liveMessage.serverContent) {
-        // AI response
+        // AI response from Live API
         role = 'model';
-        if (liveMessage.serverContent.modelTurn) {
+        
+        // Extract text content from modelTurn parts
+        if (liveMessage.serverContent.modelTurn && liveMessage.serverContent.modelTurn.parts) {
           const parts = liveMessage.serverContent.modelTurn.parts || [];
-          content.text = parts.map(part => part.text || '').join('');
+          content.text = parts.map(part => part.text || '').filter(text => text).join(' ');
         }
         
         // Handle transcriptions
         if (liveMessage.serverContent.outputTranscription) {
           liveContent.outputTranscription = liveMessage.serverContent.outputTranscription;
+          // Also use transcription as content if no text content found
+          if (!content.text && liveMessage.serverContent.outputTranscription.text) {
+            content.text = `[Audio: ${liveMessage.serverContent.outputTranscription.text}]`;
+          }
         }
         if (liveMessage.serverContent.inputTranscription) {
           liveContent.inputTranscription = liveMessage.serverContent.inputTranscription;
         }
+        
+        // Handle audio data in inline format
+        if (liveMessage.serverContent.modelTurn && liveMessage.serverContent.modelTurn.parts) {
+          for (const part of liveMessage.serverContent.modelTurn.parts) {
+            if (part.inlineData && part.inlineData.mimeType && part.inlineData.mimeType.startsWith('audio/')) {
+              liveContent.audioData = {
+                data: part.inlineData.data,
+                mimeType: part.inlineData.mimeType
+              };
+              if (!content.text) {
+                content.text = '[Audio Response]';
+              }
+            }
+          }
+        }
+      }
+      
+      // Handle direct data field (for streaming audio responses)
+      if (liveMessage.data && !content.text) {
+        content.text = '[Audio Response]';
+        liveContent.audioData = {
+          data: liveMessage.data,
+          mimeType: 'audio/pcm'
+        };
+      }
+      
+      // Ensure we have some content
+      if (!content.text && !liveContent.audioData && !liveContent.outputTranscription) {
+        console.warn('⚠️ Live message has no extractable content, using fallback');
+        content.text = '[Live Response]';
       }
 
       // Handle audio data
