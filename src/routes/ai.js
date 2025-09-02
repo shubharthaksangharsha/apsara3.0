@@ -85,7 +85,7 @@ const generateSchema = Joi.object({
   provider: Joi.string().default('google'),
   config: Joi.object({
     temperature: Joi.number().min(0).max(2).default(0.7),
-    maxOutputTokens: Joi.number().min(1).max(65536).default(2048),
+    maxOutputTokens: Joi.number().min(1).max(8192).default(2048),
     topP: Joi.number().min(0).max(1),
     topK: Joi.number().min(1).max(40),
     systemInstruction: Joi.string(),
@@ -130,7 +130,7 @@ const regenerateSchema = Joi.object({
   provider: Joi.string().default('google'),
   config: Joi.object({
     temperature: Joi.number().min(0).max(2).default(0.7),
-    maxOutputTokens: Joi.number().min(1).max(65536).default(2048),
+    maxOutputTokens: Joi.number().min(1).max(8192).default(2048),
     topP: Joi.number().min(0).max(1),
     topK: Joi.number().min(1).max(40),
     systemInstruction: Joi.string(),
@@ -824,7 +824,7 @@ router.post('/edit-message', asyncHandler(async (req, res) => {
     provider: Joi.string().default('google'),
     config: Joi.object({
       temperature: Joi.number().min(0).max(2).default(0.7),
-      maxOutputTokens: Joi.number().min(1).max(65536).default(2048),
+      maxOutputTokens: Joi.number().min(1).max(8192).default(2048),
       topP: Joi.number().min(0).max(1),
       topK: Joi.number().min(1).max(40),
       thinkingConfig: Joi.object({

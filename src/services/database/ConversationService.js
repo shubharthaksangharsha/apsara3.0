@@ -7,11 +7,24 @@ class ConversationService {
    */
   static async createConversation(userId, type = 'rest', config = {}) {
     try {
-      // Ensure user exists
-      let user = await User.findOne({ userId });
-      if (!user) {
-        user = new User({ userId });
-        await user.save();
+      // For Live sessions, userId is actually the user's MongoDB _id from JWT token
+      // For REST sessions, userId might be a custom field
+      let user;
+      
+      if (type === 'live') {
+        // For Live sessions, userId is the MongoDB _id from JWT authentication
+        user = await User.findById(userId);
+        if (!user) {
+          throw new Error(`User ${userId} not found. Live sessions require authenticated users.`);
+        }
+      } else {
+        // For REST sessions, try legacy userId field first, then _id
+        user = await User.findOne({ userId }) || await User.findById(userId);
+        if (!user) {
+          // Create user if needed (legacy behavior for REST)
+          user = new User({ userId });
+          await user.save();
+        }
       }
 
       // Check if user can create more sessions
@@ -199,7 +212,7 @@ class ConversationService {
   static async addMessage(conversationId, userId, messageData) {
     try {
       const conversation = await this.getConversation(conversationId, userId);
-      const user = await User.findOne({ userId });
+      const user = await User.findOne({ userId }) || await User.findById(userId);
       
       const messageId = uuidv4();
       
@@ -288,7 +301,7 @@ class ConversationService {
    */
   static async getUserStats(userId) {
     try {
-      const user = await User.findOne({ userId });
+      const user = await User.findOne({ userId }) || await User.findById(userId);
       if (!user) {
         throw new Error('User not found');
       }

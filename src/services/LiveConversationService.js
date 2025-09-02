@@ -166,26 +166,19 @@ export class LiveConversationService {
       console.log(`✅ Validated ${validTurns.length} turns for context loading`);
       
       try {
-        // Step 1: Send all context turns with turnComplete: false
+        // Send all context turns with turnComplete: true (no need for separate completion signal)
         const contextPayload = { 
           turns: conversationTurns, 
-          turnComplete: false
+          turnComplete: true
         };
         
-        console.log(`📦 Sending context turns (turnComplete: false)`);
+        console.log(`📦 Sending context turns (turnComplete: true)`);
         console.log(`🔍 Context payload structure:`, JSON.stringify(contextPayload, null, 2).substring(0, 500) + '...');
         await liveSession.sendClientContent(contextPayload);
         console.log(`✅ Successfully sent ${conversationTurns.length} context turns`);
         
-        // Step 2: Send completion signal with empty turns and turnComplete: true
-        const completionPayload = { 
-          turns: [], 
-          turnComplete: true
-        };
-        
-        console.log(`📦 Sending completion signal (turnComplete: true)`);
-        await liveSession.sendClientContent(completionPayload);
-        console.log(`✅ Successfully sent completion signal`);
+        // Note: Removed separate completion signal with empty turns array
+        // as it was causing "Failed to parse client content" error
         
       } catch (error) {
         console.error(`❌ Error sending incremental updates:`, error);
