@@ -380,19 +380,17 @@ export class LiveApiServer {
             });
           }
 
-          // Save AI response to conversation if linked
+          // Buffer AI response instead of saving immediately
           const sessionData = client.sessions.get(finalSessionId);
           if (sessionData?.conversationId && (response.text || response.serverContent)) {
-            try {
-              await LiveConversationService.saveLiveMessageToConversation(
-                sessionData.conversationId,
-                finalSessionId,
-                response
-              );
-              console.log(`💾 Saved AI response to conversation ${sessionData.conversationId}`);
-            } catch (saveError) {
-              console.error('Error saving AI response to conversation:', saveError);
-            }
+            // Add message to buffer instead of saving immediately
+            sessionData.messageBuffer.push({
+              conversationId: sessionData.conversationId,
+              sessionId: finalSessionId,
+              response: response,
+              timestamp: new Date()
+            });
+            console.log(`📦 Buffered AI response (${sessionData.messageBuffer.length} messages pending)`);
           }
           
           // Send all messages
@@ -414,8 +412,28 @@ export class LiveApiServer {
           });
         },
         
-        onclose: (reason) => {
+        onclose: async (reason) => {
           console.log(`🔴 Live session closing - sessionId: ${finalSessionId}, reason:`, reason);
+          
+          // Save all buffered messages before cleaning up
+          const sessionData = client.sessions.get(finalSessionId);
+          if (sessionData?.messageBuffer && sessionData.messageBuffer.length > 0) {
+            console.log(`💾 Saving ${sessionData.messageBuffer.length} buffered messages to conversation ${sessionData.conversationId}`);
+            
+            try {
+              // Save all buffered messages
+              for (const bufferedMessage of sessionData.messageBuffer) {
+                await LiveConversationService.saveLiveMessageToConversation(
+                  bufferedMessage.conversationId,
+                  bufferedMessage.sessionId,
+                  bufferedMessage.response
+                );
+              }
+              console.log(`✅ Successfully saved ${sessionData.messageBuffer.length} messages to conversation ${sessionData.conversationId}`);
+            } catch (saveError) {
+              console.error('❌ Error saving buffered messages to conversation:', saveError);
+            }
+          }
           
           // Check if this was an immediate close after creation (indicating config error)
           if (reason && reason.code === 1007) {
@@ -554,7 +572,7 @@ export class LiveApiServer {
       console.log(`🔗 Session stored in client.sessions with key: ${finalSessionId}`);
       console.log(`📊 Current client session count: ${client.sessions.size}`);
 
-      // Store session with final conversation ID
+      // Store session with final conversation ID and message buffer
       client.sessions.set(finalSessionId, {
         id: finalSessionId,
         geminiSessionId: geminiSessionId,
@@ -564,7 +582,8 @@ export class LiveApiServer {
         conversationId: finalConversationId,
         userId,
         createdAt: new Date(),
-        lastActivity: new Date()
+        lastActivity: new Date(),
+        messageBuffer: [] // Buffer to accumulate messages until session ends
       });
 
       this.sessionManager.addSession(finalSessionId, {
@@ -900,6 +919,25 @@ export class LiveApiServer {
         return this.sendError(clientId, `Session ${sessionId} not found`);
       }
 
+      // Save buffered messages before ending session
+      if (sessionData?.messageBuffer && sessionData.messageBuffer.length > 0) {
+        console.log(`💾 Saving ${sessionData.messageBuffer.length} buffered messages on session end for conversation ${sessionData.conversationId}`);
+        
+        try {
+          // Save all buffered messages
+          for (const bufferedMessage of sessionData.messageBuffer) {
+            await LiveConversationService.saveLiveMessageToConversation(
+              bufferedMessage.conversationId,
+              bufferedMessage.sessionId,
+              bufferedMessage.response
+            );
+          }
+          console.log(`✅ Successfully saved ${sessionData.messageBuffer.length} messages on session end for conversation ${sessionData.conversationId}`);
+        } catch (saveError) {
+          console.error('❌ Error saving buffered messages on session end:', saveError);
+        }
+      }
+
       // Close the live session
       sessionData.session.close();
       
@@ -922,15 +960,34 @@ export class LiveApiServer {
   /**
    * Handle client disconnection
    */
-  handleDisconnection(clientId) {
+  async handleDisconnection(clientId) {
     const client = this.clients.get(clientId);
     if (!client) return;
 
     console.log(`🔌 Client disconnected: ${clientId}`);
 
-    // Close all sessions for this client
+    // Save buffered messages and close all sessions for this client
     for (const [sessionId, sessionData] of client.sessions) {
       try {
+        // Save buffered messages before closing session
+        if (sessionData?.messageBuffer && sessionData.messageBuffer.length > 0) {
+          console.log(`💾 Saving ${sessionData.messageBuffer.length} buffered messages on client disconnect for conversation ${sessionData.conversationId}`);
+          
+          try {
+            // Save all buffered messages
+            for (const bufferedMessage of sessionData.messageBuffer) {
+              await LiveConversationService.saveLiveMessageToConversation(
+                bufferedMessage.conversationId,
+                bufferedMessage.sessionId,
+                bufferedMessage.response
+              );
+            }
+            console.log(`✅ Successfully saved ${sessionData.messageBuffer.length} messages on disconnect for conversation ${sessionData.conversationId}`);
+          } catch (saveError) {
+            console.error('❌ Error saving buffered messages on client disconnect:', saveError);
+          }
+        }
+        
         sessionData.session.close();
         this.sessionManager.removeSession(sessionId);
       } catch (error) {
