@@ -213,8 +213,14 @@ export class LiveConversationService {
         continue;
       }
 
+      // ONLY include user messages in context - Gemini Live API rejects model messages in context
+      if (message.role !== 'user') {
+        console.log(`⚠️ Skipping ${message.role} message from context (Live API only accepts user messages)`);
+        continue;
+      }
+
       const turn = {
-        role: message.role === 'model' ? 'model' : 'user',
+        role: 'user', // Always user for context loading
         parts: []
       };
 
@@ -225,19 +231,11 @@ export class LiveConversationService {
         textContent = message.content.text.trim();
       }
 
-      // Add Live content if available (prioritize transcriptions)
+      // Add Live content if available (only for user messages since we filtered out model messages)
       if (message.liveContent) {
         // For user messages, use input transcription
-        if (message.role === 'user' && message.liveContent.inputTranscription?.text) {
+        if (message.liveContent.inputTranscription?.text) {
           textContent = message.liveContent.inputTranscription.text.trim();
-        }
-        // For model messages, use output transcription or generated text
-        else if (message.role === 'model') {
-          if (message.liveContent.outputTranscription?.text) {
-            textContent = message.liveContent.outputTranscription.text.trim();
-          } else if (message.liveContent.generatedText) {
-            textContent = message.liveContent.generatedText.trim();
-          }
         }
       }
 
@@ -276,7 +274,7 @@ export class LiveConversationService {
       }
     }
 
-    console.log(`🔄 Converted ${messages.length} database messages to ${turns.length} Live API turns`);
+    console.log(`🔄 Converted ${messages.length} database messages to ${turns.length} user turns for Live API context`);
     return turns;
   }
 
@@ -324,19 +322,20 @@ export class LiveConversationService {
           content.text = parts.map(part => part.text || '').filter(text => text).join(' ');
         }
         
-        // Handle transcriptions
+        // Handle transcriptions - PRIORITIZE transcription text over audio placeholders
         if (liveMessage.serverContent.outputTranscription) {
           liveContent.outputTranscription = liveMessage.serverContent.outputTranscription;
-          // Also use transcription as content if no text content found
-          if (!content.text && liveMessage.serverContent.outputTranscription.text) {
-            content.text = `[Audio: ${liveMessage.serverContent.outputTranscription.text}]`;
+          // Use transcription text as primary content (prioritize over placeholders)
+          if (liveMessage.serverContent.outputTranscription.text) {
+            content.text = liveMessage.serverContent.outputTranscription.text;
+            console.log('✅ Using output transcription as content:', content.text);
           }
         }
         if (liveMessage.serverContent.inputTranscription) {
           liveContent.inputTranscription = liveMessage.serverContent.inputTranscription;
         }
         
-        // Handle audio data in inline format
+        // Handle audio data in inline format - only use placeholder if no transcription exists
         if (liveMessage.serverContent.modelTurn && liveMessage.serverContent.modelTurn.parts) {
           for (const part of liveMessage.serverContent.modelTurn.parts) {
             if (part.inlineData && part.inlineData.mimeType && part.inlineData.mimeType.startsWith('audio/')) {
@@ -344,8 +343,12 @@ export class LiveConversationService {
                 data: part.inlineData.data,
                 mimeType: part.inlineData.mimeType
               };
-              if (!content.text) {
+              // Only use [Audio Response] placeholder if no transcription text exists
+              if (!content.text || content.text === '[Audio Response]') {
                 content.text = '[Audio Response]';
+                console.log('⚠️ Using audio placeholder as no transcription available');
+              } else {
+                console.log('✅ Audio data stored, but keeping transcription text as content');
               }
             }
           }
