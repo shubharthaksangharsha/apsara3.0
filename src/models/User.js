@@ -293,6 +293,23 @@ userSchema.methods.handleSuccessfulLogin = async function() {
   return this.updateOne(updates);
 };
 
+// Instance method to check if user can create more sessions
+userSchema.methods.canCreateSession = function() {
+  // Define session limits based on subscription plan
+  const sessionLimits = {
+    guest: 1,
+    free: 5,
+    premium: 20,
+    enterprise: 100
+  };
+  
+  const maxSessions = sessionLimits[this.subscriptionPlan] || sessionLimits.free;
+  
+  // For now, always allow session creation (can be enhanced with actual session counting)
+  // TODO: Implement actual session counting against current active sessions
+  return this.usage.totalRequests < maxSessions * 10; // Simple check for now
+};
+
 // Remove sensitive data when converting to JSON
 userSchema.methods.toJSON = function() {
   const userObject = this.toObject();

@@ -183,18 +183,31 @@ export class GoogleProvider extends BaseProvider {
     const { model = 'gemini-2.0-flash-live-001', config = {}, callbacks = {} } = params;
 
     try {
+      // Sanitize config to only include valid Live API parameters
+      const validConfig = {};
+      
+      // Add valid configuration properties
+      if (config.responseModalities) validConfig.responseModalities = config.responseModalities;
+      if (config.systemInstruction) validConfig.systemInstruction = config.systemInstruction;
+      if (config.tools) validConfig.tools = config.tools;
+      if (config.speechConfig) validConfig.speechConfig = config.speechConfig;
+      if (config.sessionResumption) validConfig.sessionResumption = config.sessionResumption;
+      if (config.contextWindowCompression) validConfig.contextWindowCompression = config.contextWindowCompression;
+      if (config.outputAudioTranscription) validConfig.outputAudioTranscription = config.outputAudioTranscription;
+      
+      // Handle realtimeInputConfig properly - mediaResolution should be inside it if provided
+      if (config.realtimeInputConfig) {
+        validConfig.realtimeInputConfig = config.realtimeInputConfig;
+      } else if (config.mediaResolution) {
+        // Move mediaResolution to the correct location
+        validConfig.realtimeInputConfig = {
+          mediaResolution: config.mediaResolution
+        };
+      }
+      
       const session = await this.client.live.connect({
         model,
-        config: {
-          responseModalities: config.responseModalities || [Modality.TEXT],
-          ...(config.systemInstruction && { systemInstruction: config.systemInstruction }),
-          ...(config.tools && { tools: config.tools }),
-          ...(config.speechConfig && { speechConfig: config.speechConfig }),
-          ...(config.realtimeInputConfig && { realtimeInputConfig: config.realtimeInputConfig }),
-          ...(config.sessionResumption && { sessionResumption: config.sessionResumption }),
-          ...(config.contextWindowCompression && { contextWindowCompression: config.contextWindowCompression }),
-          ...config
-        },
+        config: validConfig,
         callbacks: {
           onopen: callbacks.onopen || (() => console.log('🟢 Google Live session opened')),
           onmessage: callbacks.onmessage || ((message) => console.log('📨 Google Live message:', message)),
