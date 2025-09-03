@@ -344,11 +344,17 @@ export class LiveConversationService {
                 mimeType: part.inlineData.mimeType
               };
               // Only use [Audio Response] placeholder if no transcription text exists
-              if (!content.text || content.text === '[Audio Response]') {
+              // Check if we have meaningful transcription text (not just placeholders)
+              const hasTranscriptionText = content.text && 
+                                         content.text.trim().length > 0 && 
+                                         content.text !== '[Audio Response]' && 
+                                         content.text !== '[Live Response]';
+              
+              if (!hasTranscriptionText) {
                 content.text = '[Audio Response]';
                 console.log('⚠️ Using audio placeholder as no transcription available');
               } else {
-                console.log('✅ Audio data stored, but keeping transcription text as content');
+                console.log('✅ Audio data stored, but keeping transcription text as content:', content.text);
               }
             }
           }
@@ -356,8 +362,17 @@ export class LiveConversationService {
       }
       
       // Handle direct data field (for streaming audio responses)
-      if (liveMessage.data && !content.text) {
-        content.text = '[Audio Response]';
+      if (liveMessage.data) {
+        // Check if we have meaningful transcription text (not just placeholders)
+        const hasTranscriptionText = content.text && 
+                                   content.text.trim().length > 0 && 
+                                   content.text !== '[Audio Response]' && 
+                                   content.text !== '[Live Response]';
+        
+        if (!hasTranscriptionText) {
+          content.text = '[Audio Response]';
+        }
+        
         liveContent.audioData = {
           data: liveMessage.data,
           mimeType: 'audio/pcm'
