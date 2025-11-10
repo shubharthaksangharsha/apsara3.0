@@ -422,18 +422,21 @@ export class LiveApiServer {
           // Save all buffered messages before cleaning up
           const sessionData = client.sessions.get(finalSessionId);
           if (sessionData?.messageBuffer && sessionData.messageBuffer.length > 0) {
-            console.log(`💾 Saving ${sessionData.messageBuffer.length} buffered messages to conversation ${sessionData.conversationId}`);
+            console.log(`💾 Processing ${sessionData.messageBuffer.length} buffered messages for conversation ${sessionData.conversationId}`);
             
             try {
-              // Save all buffered messages
-              for (const bufferedMessage of sessionData.messageBuffer) {
+              // Accumulate transcription fragments before saving
+              const mergedMessages = LiveConversationService.accumulateTranscriptionFragments(sessionData.messageBuffer);
+              
+              // Save merged messages
+              for (const mergedMessage of mergedMessages) {
                 await LiveConversationService.saveLiveMessageToConversation(
-                  bufferedMessage.conversationId,
-                  bufferedMessage.sessionId,
-                  bufferedMessage.response
+                  mergedMessage.conversationId,
+                  mergedMessage.sessionId,
+                  mergedMessage.response
                 );
               }
-              console.log(`✅ Successfully saved ${sessionData.messageBuffer.length} messages to conversation ${sessionData.conversationId}`);
+              console.log(`✅ Successfully saved ${mergedMessages.length} merged messages to conversation ${sessionData.conversationId}`);
               
               // Clear buffer after saving
               sessionData.messageBuffer = [];
@@ -1009,19 +1012,21 @@ export class LiveApiServer {
 
       // Save buffered messages before ending session
       if (sessionData?.messageBuffer && sessionData.messageBuffer.length > 0) {
-        console.log(`💾 Saving ${sessionData.messageBuffer.length} buffered messages on session end for conversation ${sessionData.conversationId}`);
+        console.log(`💾 Processing ${sessionData.messageBuffer.length} buffered messages on session end for conversation ${sessionData.conversationId}`);
         
         try {
-          // Save all buffered messages
-          const messageCount = sessionData.messageBuffer.length;
-          for (const bufferedMessage of sessionData.messageBuffer) {
+          // Accumulate transcription fragments before saving
+          const mergedMessages = LiveConversationService.accumulateTranscriptionFragments(sessionData.messageBuffer);
+          
+          // Save merged messages
+          for (const mergedMessage of mergedMessages) {
             await LiveConversationService.saveLiveMessageToConversation(
-              bufferedMessage.conversationId,
-              bufferedMessage.sessionId,
-              bufferedMessage.response
+              mergedMessage.conversationId,
+              mergedMessage.sessionId,
+              mergedMessage.response
             );
           }
-          console.log(`✅ Successfully saved ${messageCount} messages on session end for conversation ${sessionData.conversationId}`);
+          console.log(`✅ Successfully saved ${mergedMessages.length} merged messages on session end for conversation ${sessionData.conversationId}`);
           
           // Clear buffer after saving
           sessionData.messageBuffer = [];
@@ -1063,19 +1068,21 @@ export class LiveApiServer {
       try {
         // Save buffered messages before closing session
         if (sessionData?.messageBuffer && sessionData.messageBuffer.length > 0) {
-          console.log(`💾 Saving ${sessionData.messageBuffer.length} buffered messages on client disconnect for conversation ${sessionData.conversationId}`);
+          console.log(`💾 Processing ${sessionData.messageBuffer.length} buffered messages on client disconnect for conversation ${sessionData.conversationId}`);
           
           try {
-            // Save all buffered messages
-            const messageCount = sessionData.messageBuffer.length;
-            for (const bufferedMessage of sessionData.messageBuffer) {
+            // Accumulate transcription fragments before saving
+            const mergedMessages = LiveConversationService.accumulateTranscriptionFragments(sessionData.messageBuffer);
+            
+            // Save merged messages
+            for (const mergedMessage of mergedMessages) {
               await LiveConversationService.saveLiveMessageToConversation(
-                bufferedMessage.conversationId,
-                bufferedMessage.sessionId,
-                bufferedMessage.response
+                mergedMessage.conversationId,
+                mergedMessage.sessionId,
+                mergedMessage.response
               );
             }
-            console.log(`✅ Successfully saved ${messageCount} messages on disconnect for conversation ${sessionData.conversationId}`);
+            console.log(`✅ Successfully saved ${mergedMessages.length} merged messages on disconnect for conversation ${sessionData.conversationId}`);
             
             // Clear buffer after saving
             sessionData.messageBuffer = [];

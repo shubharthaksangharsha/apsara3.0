@@ -279,6 +279,305 @@ export class LiveConversationService {
   }
 
   /**
+   * Accumulate and merge transcription fragments from buffered messages
+   * @param {Array} bufferedMessages - Array of buffered message objects
+   * @returns {Array} Array of merged messages ready to save
+   */
+  static accumulateTranscriptionFragments(bufferedMessages) {
+    const mergedMessages = [];
+    let currentInputTranscription = null;
+    let currentOutputTranscription = null;
+    let currentUserText = null;
+    let currentModelText = null;
+    let accumulatedAudioData = [];
+    
+    for (const buffered of bufferedMessages) {
+      const msg = buffered.response;
+      
+      // Accumulate input transcription fragments
+      if (msg.serverContent?.inputTranscription?.text) {
+        const fragment = msg.serverContent.inputTranscription.text.trim();
+        if (fragment.length > 0) {
+          if (!currentInputTranscription) {
+            currentInputTranscription = {
+              text: fragment,
+              original: msg.serverContent.inputTranscription
+            };
+          } else {
+            // Check if this is an expansion (new text contains/extends old text) or continuation
+            const currentText = currentInputTranscription.text;
+            
+            if (fragment.startsWith(currentText)) {
+              // Expansion - new text is longer version of current text
+              currentInputTranscription.text = fragment;
+              currentInputTranscription.original = msg.serverContent.inputTranscription;
+            } else if (currentText.endsWith(' ') || 
+                      currentText.endsWith('.') || 
+                      currentText.endsWith('!') || 
+                      currentText.endsWith('?') ||
+                      currentText.endsWith(',') ||
+                      currentText.endsWith(';') ||
+                      currentText.endsWith(':')) {
+              // Previous text ended with punctuation/space - append directly
+              currentInputTranscription.text += fragment;
+            } else if (fragment.length < 15 && !fragment.includes(' ')) {
+              // Short fragment without spaces - likely continuation of a word
+              // Check if current text ends with a letter and fragment starts with a letter
+              const currentEndsWithLetter = /[a-zA-Z]$/.test(currentText);
+              const fragmentStartsWithLetter = /^[a-zA-Z]/.test(fragment);
+              
+              if (currentEndsWithLetter && fragmentStartsWithLetter) {
+                // Both are letters - likely word continuation, append directly
+                currentInputTranscription.text += fragment;
+              } else {
+                // Add space for clarity
+                currentInputTranscription.text += ' ' + fragment;
+              }
+            } else {
+              // Longer fragment or contains spaces - add space before
+              currentInputTranscription.text += ' ' + fragment;
+            }
+          }
+        }
+      }
+      
+      // Accumulate output transcription fragments
+      if (msg.serverContent?.outputTranscription?.text) {
+        const fragment = msg.serverContent.outputTranscription.text.trim();
+        if (fragment.length > 0) {
+          if (!currentOutputTranscription) {
+            currentOutputTranscription = {
+              text: fragment,
+              original: msg.serverContent.outputTranscription
+            };
+          } else {
+            // Check if this is an expansion (new text contains/extends old text)
+            const currentText = currentOutputTranscription.text;
+            
+            if (fragment.startsWith(currentText)) {
+              // Expansion - new text is longer version of current text
+              currentOutputTranscription.text = fragment;
+              currentOutputTranscription.original = msg.serverContent.outputTranscription;
+            } else if (currentText.endsWith(' ') || 
+                      currentText.endsWith('.') || 
+                      currentText.endsWith('!') || 
+                      currentText.endsWith('?') ||
+                      currentText.endsWith(',') ||
+                      currentText.endsWith(';') ||
+                      currentText.endsWith(':')) {
+              // Previous text ended with punctuation/space - append directly
+              currentOutputTranscription.text += fragment;
+            } else if (fragment.length < 15 && !fragment.includes(' ')) {
+              // Short fragment without spaces - likely continuation of a word
+              // Check if current text ends with a letter and fragment starts with a letter
+              const currentEndsWithLetter = /[a-zA-Z]$/.test(currentText);
+              const fragmentStartsWithLetter = /^[a-zA-Z]/.test(fragment);
+              
+              if (currentEndsWithLetter && fragmentStartsWithLetter) {
+                // Both are letters - likely word continuation, append directly
+                currentOutputTranscription.text += fragment;
+              } else {
+                // Add space for clarity
+                currentOutputTranscription.text += ' ' + fragment;
+              }
+            } else {
+              // Longer fragment or contains spaces - add space before
+              currentOutputTranscription.text += ' ' + fragment;
+            }
+          }
+        }
+      }
+      
+      // Accumulate text-only messages
+      if (msg.text && !msg.serverContent) {
+        if (msg.role === 'user') {
+          if (!currentUserText) {
+            currentUserText = msg.text;
+          } else {
+            currentUserText += ' ' + msg.text;
+          }
+        } else {
+          if (!currentModelText) {
+            currentModelText = msg.text;
+          } else {
+            currentModelText += ' ' + msg.text;
+          }
+        }
+      }
+      
+      // Collect audio data (keep all for merging)
+      if (msg.data || (msg.serverContent?.modelTurn?.parts)) {
+        if (msg.data) {
+          accumulatedAudioData.push({
+            data: msg.data,
+            mimeType: 'audio/pcm'
+          });
+        }
+        if (msg.serverContent?.modelTurn?.parts) {
+          for (const part of msg.serverContent.modelTurn.parts) {
+            if (part.inlineData?.mimeType?.startsWith('audio/')) {
+              accumulatedAudioData.push({
+                data: part.inlineData.data,
+                mimeType: part.inlineData.mimeType
+              });
+            }
+          }
+        }
+      }
+      
+      // Check for turnComplete or generationComplete - save accumulated transcriptions
+      if (msg.serverContent?.turnComplete || msg.serverContent?.generationComplete) {
+        // Save accumulated input transcription
+        if (currentInputTranscription) {
+          // Normalize text: remove extra spaces, clean up
+          const normalizedText = currentInputTranscription.text
+            .replace(/\s+/g, ' ') // Multiple spaces to single space
+            .replace(/\s+([.,!?;:])/g, '$1') // Remove space before punctuation
+            .trim();
+          
+          mergedMessages.push({
+            conversationId: buffered.conversationId,
+            sessionId: buffered.sessionId,
+            response: {
+              serverContent: {
+                inputTranscription: {
+                  text: normalizedText,
+                  ...currentInputTranscription.original
+                }
+              }
+            }
+          });
+          currentInputTranscription = null;
+        }
+        
+        // Save accumulated output transcription
+        if (currentOutputTranscription) {
+          // Normalize text: remove extra spaces, clean up
+          const normalizedText = currentOutputTranscription.text
+            .replace(/\s+/g, ' ') // Multiple spaces to single space
+            .replace(/\s+([.,!?;:])/g, '$1') // Remove space before punctuation
+            .trim();
+          
+          const mergedMsg = {
+            conversationId: buffered.conversationId,
+            sessionId: buffered.sessionId,
+            response: {
+              serverContent: {
+                outputTranscription: {
+                  text: normalizedText,
+                  ...currentOutputTranscription.original
+                }
+              }
+            }
+          };
+          
+          // Add audio data if available
+          if (accumulatedAudioData.length > 0) {
+            mergedMsg.response.serverContent.modelTurn = {
+              parts: accumulatedAudioData.map(audio => ({
+                inlineData: {
+                  data: audio.data,
+                  mimeType: audio.mimeType
+                }
+              }))
+            };
+          }
+          
+          mergedMessages.push(mergedMsg);
+          currentOutputTranscription = null;
+          accumulatedAudioData = [];
+        }
+      }
+    }
+    
+    // Save any remaining accumulated transcriptions (for messages without turnComplete)
+    if (currentInputTranscription) {
+      const lastBuffered = bufferedMessages[bufferedMessages.length - 1];
+      // Normalize text: remove extra spaces, clean up
+      const normalizedText = currentInputTranscription.text
+        .replace(/\s+/g, ' ') // Multiple spaces to single space
+        .replace(/\s+([.,!?;:])/g, '$1') // Remove space before punctuation
+        .trim();
+      
+      mergedMessages.push({
+        conversationId: lastBuffered.conversationId,
+        sessionId: lastBuffered.sessionId,
+        response: {
+          serverContent: {
+            inputTranscription: {
+              text: normalizedText,
+              ...currentInputTranscription.original
+            }
+          }
+        }
+      });
+    }
+    
+    if (currentOutputTranscription) {
+      const lastBuffered = bufferedMessages[bufferedMessages.length - 1];
+      // Normalize text: remove extra spaces, clean up
+      const normalizedText = currentOutputTranscription.text
+        .replace(/\s+/g, ' ') // Multiple spaces to single space
+        .replace(/\s+([.,!?;:])/g, '$1') // Remove space before punctuation
+        .trim();
+      
+      const mergedMsg = {
+        conversationId: lastBuffered.conversationId,
+        sessionId: lastBuffered.sessionId,
+        response: {
+          serverContent: {
+            outputTranscription: {
+              text: normalizedText,
+              ...currentOutputTranscription.original
+            }
+          }
+        }
+      };
+      
+      if (accumulatedAudioData.length > 0) {
+        mergedMsg.response.serverContent.modelTurn = {
+          parts: accumulatedAudioData.map(audio => ({
+            inlineData: {
+              data: audio.data,
+              mimeType: audio.mimeType
+            }
+          }))
+        };
+      }
+      
+      mergedMessages.push(mergedMsg);
+    }
+    
+    // Save text-only messages that weren't part of transcriptions
+    if (currentUserText) {
+      const lastBuffered = bufferedMessages[bufferedMessages.length - 1];
+      mergedMessages.push({
+        conversationId: lastBuffered.conversationId,
+        sessionId: lastBuffered.sessionId,
+        response: {
+          text: currentUserText,
+          role: 'user'
+        }
+      });
+    }
+    
+    if (currentModelText) {
+      const lastBuffered = bufferedMessages[bufferedMessages.length - 1];
+      mergedMessages.push({
+        conversationId: lastBuffered.conversationId,
+        sessionId: lastBuffered.sessionId,
+        response: {
+          text: currentModelText,
+          role: 'model'
+        }
+      });
+    }
+    
+    console.log(`🔄 Accumulated ${bufferedMessages.length} buffered messages into ${mergedMessages.length} complete messages`);
+    return mergedMessages;
+  }
+
+  /**
    * Save Live API message to conversation
    * Properly handles input transcription (user) and output transcription (model) separately
    * @param {string} conversationId - Conversation ID
