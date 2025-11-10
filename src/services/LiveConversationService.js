@@ -280,11 +280,12 @@ export class LiveConversationService {
 
   /**
    * Save Live API message to conversation
+   * Properly handles input transcription (user) and output transcription (model) separately
    * @param {string} conversationId - Conversation ID
    * @param {string} sessionId - Live session ID
-   * @param {Object} liveMessage - Live API message
+   * @param {Object} liveMessage - Live API message from Gemini
    * @param {Object} audioFile - Audio file information (optional)
-   * @returns {Promise<Object>} Saved message
+   * @returns {Promise<Object|Array|null>} Saved message(s) or null if skipped
    */
   static async saveLiveMessageToConversation(conversationId, sessionId, liveMessage, audioFile = null) {
     try {
@@ -294,155 +295,277 @@ export class LiveConversationService {
         throw new Error(`Conversation ${conversationId} not found`);
       }
 
-      // Get next message sequence
-      const messageSequence = conversation.getNextMessageSequence();
-      await conversation.save();
-
-      // Determine message role and content
-      let role = 'user';
-      let content = { text: '' };
-      let liveContent = {};
-
-      // Process different types of Live API messages
       console.log('🔍 Processing Live message structure:', JSON.stringify(liveMessage, null, 2));
       
-      if (liveMessage.text) {
-        // Text message
-        content.text = liveMessage.text;
-        role = liveMessage.role || 'user';
+      const savedMessages = [];
+      
+      // Handle input transcription (user speech) - save as USER message
+      if (liveMessage.serverContent?.inputTranscription?.text) {
+        const inputText = liveMessage.serverContent.inputTranscription.text.trim();
+        if (inputText.length > 0) {
+          const messageSequence = conversation.getNextMessageSequence();
+          await conversation.save();
+          
+          const userMessage = new Message({
+            messageId: uuidv4(),
+            conversationId,
+            userId: conversation.userId,
+            messageSequence,
+            messageType: 'live',
+            role: 'user',
+            content: {
+              text: inputText
+            },
+            liveContent: {
+              inputTranscription: liveMessage.serverContent.inputTranscription
+            },
+            config: {
+              live: {
+                model: conversation.config.live.model || 'gemini-2.0-flash-live-001',
+                sessionId,
+                responseModalities: conversation.config.live.responseModalities || ['AUDIO']
+              }
+            },
+            status: 'completed',
+            metadata: {
+              timing: {
+                requestTime: new Date()
+              },
+              provider: {
+                name: 'google',
+                sessionId
+              }
+            }
+          });
+          
+          await userMessage.save();
+          await conversation.incrementStats('live');
+          conversation.session.lastActivity = new Date();
+          await conversation.save();
+          
+          console.log(`💾 Saved USER message (input transcription): "${inputText.substring(0, 50)}..."`);
+          savedMessages.push(userMessage);
+        }
       }
       
-      if (liveMessage.serverContent) {
-        // AI response from Live API
-        role = 'model';
-        
-        // Extract text content from modelTurn parts
-        if (liveMessage.serverContent.modelTurn && liveMessage.serverContent.modelTurn.parts) {
-          const parts = liveMessage.serverContent.modelTurn.parts || [];
-          content.text = parts.map(part => part.text || '').filter(text => text).join(' ');
-        }
-        
-        // Handle transcriptions - PRIORITIZE transcription text over audio placeholders
-        if (liveMessage.serverContent.outputTranscription) {
-          liveContent.outputTranscription = liveMessage.serverContent.outputTranscription;
-          // Use transcription text as primary content (prioritize over placeholders)
-          if (liveMessage.serverContent.outputTranscription.text) {
-            content.text = liveMessage.serverContent.outputTranscription.text;
-            console.log('✅ Using output transcription as content:', content.text);
+      // Handle output transcription (AI response) - save as MODEL message
+      if (liveMessage.serverContent?.outputTranscription?.text) {
+        const outputText = liveMessage.serverContent.outputTranscription.text.trim();
+        if (outputText.length > 0) {
+          const messageSequence = conversation.getNextMessageSequence();
+          await conversation.save();
+          
+          const liveContent = {
+            outputTranscription: liveMessage.serverContent.outputTranscription
+          };
+          
+          // Extract text from modelTurn parts if available
+          let modelText = outputText;
+          if (liveMessage.serverContent.modelTurn?.parts) {
+            const textParts = liveMessage.serverContent.modelTurn.parts
+              .map(part => part.text)
+              .filter(text => text && text.trim().length > 0);
+            if (textParts.length > 0) {
+              modelText = textParts.join(' ');
+            }
           }
+          
+          // Handle audio data if present
+          if (liveMessage.serverContent.modelTurn?.parts) {
+            for (const part of liveMessage.serverContent.modelTurn.parts) {
+              if (part.inlineData?.mimeType?.startsWith('audio/')) {
+                liveContent.audioData = {
+                  data: part.inlineData.data,
+                  mimeType: part.inlineData.mimeType
+                };
+                break;
+              }
+            }
+          }
+          
+          // Handle direct audio data field
+          if (liveMessage.data) {
+            liveContent.audioData = {
+              data: liveMessage.data,
+              mimeType: 'audio/pcm'
+            };
+          }
+          
+          // Handle stored audio file
+          if (audioFile) {
+            liveContent.audioData = {
+              fileId: audioFile.fileId,
+              url: audioFile.url,
+              duration: audioFile.duration,
+              mimeType: audioFile.mimeType
+            };
+          }
+          
+          const modelMessage = new Message({
+            messageId: uuidv4(),
+            conversationId,
+            userId: conversation.userId,
+            messageSequence,
+            messageType: 'live',
+            role: 'model',
+            content: {
+              text: modelText
+            },
+            liveContent,
+            config: {
+              live: {
+                model: conversation.config.live.model || 'gemini-2.0-flash-live-001',
+                sessionId,
+                responseModalities: conversation.config.live.responseModalities || ['AUDIO']
+              }
+            },
+            status: 'completed',
+            metadata: {
+              timing: {
+                requestTime: new Date()
+              },
+              provider: {
+                name: 'google',
+                sessionId
+              }
+            }
+          });
+          
+          await modelMessage.save();
+          await conversation.incrementStats('live');
+          conversation.session.lastActivity = new Date();
+          await conversation.save();
+          
+          console.log(`💾 Saved MODEL message (output transcription): "${modelText.substring(0, 50)}..."`);
+          savedMessages.push(modelMessage);
         }
-        if (liveMessage.serverContent.inputTranscription) {
-          liveContent.inputTranscription = liveMessage.serverContent.inputTranscription;
+      }
+      
+      // Handle text-only messages (from sendClientContent or sendMessage)
+      if (liveMessage.text && !liveMessage.serverContent) {
+        const text = liveMessage.text.trim();
+        if (text.length > 0) {
+          const messageSequence = conversation.getNextMessageSequence();
+          await conversation.save();
+          
+          const role = liveMessage.role || 'user';
+          
+          const textMessage = new Message({
+            messageId: uuidv4(),
+            conversationId,
+            userId: conversation.userId,
+            messageSequence,
+            messageType: 'live',
+            role,
+            content: {
+              text: text
+            },
+            config: {
+              live: {
+                model: conversation.config.live.model || 'gemini-2.0-flash-live-001',
+                sessionId,
+                responseModalities: conversation.config.live.responseModalities || ['TEXT']
+              }
+            },
+            status: 'completed',
+            metadata: {
+              timing: {
+                requestTime: new Date()
+              },
+              provider: {
+                name: 'google',
+                sessionId
+              }
+            }
+          });
+          
+          await textMessage.save();
+          await conversation.incrementStats('live');
+          conversation.session.lastActivity = new Date();
+          await conversation.save();
+          
+          console.log(`💾 Saved ${role.toUpperCase()} message (text): "${text.substring(0, 50)}..."`);
+          savedMessages.push(textMessage);
         }
+      }
+      
+      // Handle modelTurn with text but no transcription (fallback)
+      if (liveMessage.serverContent?.modelTurn?.parts && 
+          !liveMessage.serverContent.outputTranscription &&
+          !liveMessage.serverContent.inputTranscription) {
+        const textParts = liveMessage.serverContent.modelTurn.parts
+          .map(part => part.text)
+          .filter(text => text && text.trim().length > 0);
         
-        // Handle audio data in inline format - only use placeholder if no transcription exists
-        if (liveMessage.serverContent.modelTurn && liveMessage.serverContent.modelTurn.parts) {
+        if (textParts.length > 0) {
+          const messageSequence = conversation.getNextMessageSequence();
+          await conversation.save();
+          
+          const modelText = textParts.join(' ');
+          const liveContent = {};
+          
+          // Handle audio data if present
           for (const part of liveMessage.serverContent.modelTurn.parts) {
-            if (part.inlineData && part.inlineData.mimeType && part.inlineData.mimeType.startsWith('audio/')) {
+            if (part.inlineData?.mimeType?.startsWith('audio/')) {
               liveContent.audioData = {
                 data: part.inlineData.data,
                 mimeType: part.inlineData.mimeType
               };
-              // Only use [Audio Response] placeholder if no transcription text exists
-              // Check if we have meaningful transcription text (not just placeholders)
-              const hasTranscriptionText = content.text && 
-                                         content.text.trim().length > 0 && 
-                                         content.text !== '[Audio Response]' && 
-                                         content.text !== '[Live Response]';
-              
-              if (!hasTranscriptionText) {
-                content.text = '[Audio Response]';
-                console.log('⚠️ Using audio placeholder as no transcription available');
-              } else {
-                console.log('✅ Audio data stored, but keeping transcription text as content:', content.text);
-              }
+              break;
             }
           }
+          
+          const modelMessage = new Message({
+            messageId: uuidv4(),
+            conversationId,
+            userId: conversation.userId,
+            messageSequence,
+            messageType: 'live',
+            role: 'model',
+            content: {
+              text: modelText
+            },
+            liveContent: Object.keys(liveContent).length > 0 ? liveContent : undefined,
+            config: {
+              live: {
+                model: conversation.config.live.model || 'gemini-2.0-flash-live-001',
+                sessionId,
+                responseModalities: conversation.config.live.responseModalities || ['TEXT']
+              }
+            },
+            status: 'completed',
+            metadata: {
+              timing: {
+                requestTime: new Date()
+              },
+              provider: {
+                name: 'google',
+                sessionId
+              }
+            }
+          });
+          
+          await modelMessage.save();
+          await conversation.incrementStats('live');
+          conversation.session.lastActivity = new Date();
+          await conversation.save();
+          
+          console.log(`💾 Saved MODEL message (modelTurn text): "${modelText.substring(0, 50)}..."`);
+          savedMessages.push(modelMessage);
         }
       }
       
-      // Handle direct data field (for streaming audio responses)
-      if (liveMessage.data) {
-        // Check if we have meaningful transcription text (not just placeholders)
-        const hasTranscriptionText = content.text && 
-                                   content.text.trim().length > 0 && 
-                                   content.text !== '[Audio Response]' && 
-                                   content.text !== '[Live Response]';
-        
-        if (!hasTranscriptionText) {
-          content.text = '[Audio Response]';
-        }
-        
-        liveContent.audioData = {
-          data: liveMessage.data,
-          mimeType: 'audio/pcm'
-        };
+      // Return saved messages
+      if (savedMessages.length === 0) {
+        console.log('⚠️ No messages saved - message had no extractable content');
+        return null;
       }
       
-      // Ensure we have some content
-      if (!content.text && !liveContent.audioData && !liveContent.outputTranscription) {
-        console.warn('⚠️ Live message has no extractable content, using fallback');
-        content.text = '[Live Response]';
+      if (savedMessages.length === 1) {
+        return savedMessages[0];
       }
-
-      // Handle audio data
-      if (audioFile) {
-        liveContent.audioData = {
-          fileId: audioFile.fileId,
-          url: audioFile.url,
-          duration: audioFile.duration,
-          mimeType: audioFile.mimeType
-        };
-      }
-
-      // Handle realtime input metadata
-      if (liveMessage.realtimeInput) {
-        liveContent.realtimeInput = {
-          type: liveMessage.realtimeInput.type || 'audio',
-          streamMetadata: liveMessage.realtimeInput
-        };
-      }
-
-      // Create message document
-      const messageData = {
-        messageId: uuidv4(),
-        conversationId,
-        userId: conversation.userId,
-        messageSequence,
-        messageType: 'live',
-        role,
-        content,
-        liveContent,
-        config: {
-          live: {
-            model: conversation.config.live.model || 'gemini-2.0-flash-live-001',
-            sessionId,
-            responseModalities: conversation.config.live.responseModalities || ['TEXT']
-          }
-        },
-        status: 'completed',
-        metadata: {
-          timing: {
-            requestTime: new Date()
-          },
-          provider: {
-            name: 'google',
-            sessionId
-          }
-        }
-      };
-
-      const message = new Message(messageData);
-      await message.save();
-
-      // Update conversation stats
-      await conversation.incrementStats('live');
-      conversation.session.lastActivity = new Date();
-      await conversation.save();
-
-      console.log(`💾 Saved Live message ${message.messageId} to conversation ${conversationId}`);
       
-      return message;
+      return savedMessages;
       
     } catch (error) {
       console.error('Error saving Live message to conversation:', error);

@@ -141,6 +141,10 @@ export class LiveApiServer {
         await this.handleSendMessage(clientId, data);
         break;
       
+      case 'send_client_content':
+        await this.handleSendClientContent(clientId, data);
+        break;
+      
       case 'send_realtime_input':
         await this.handleRealtimeInput(clientId, data);
         break;
@@ -430,6 +434,9 @@ export class LiveApiServer {
                 );
               }
               console.log(`✅ Successfully saved ${sessionData.messageBuffer.length} messages to conversation ${sessionData.conversationId}`);
+              
+              // Clear buffer after saving
+              sessionData.messageBuffer = [];
             } catch (saveError) {
               console.error('❌ Error saving buffered messages to conversation:', saveError);
             }
@@ -771,6 +778,82 @@ export class LiveApiServer {
   }
 
   /**
+   * Handle send client content (direct client content for Live API)
+   */
+  async handleSendClientContent(clientId, message) {
+    try {
+      console.log(`📤 handleSendClientContent received:`, JSON.stringify(message, null, 2));
+      
+      const { sessionId, turns, turnComplete = true } = message.data || {};
+      
+      if (!sessionId) {
+        return this.sendError(clientId, 'Session ID is required for send_client_content');
+      }
+      
+      if (!turns || !Array.isArray(turns) || turns.length === 0) {
+        return this.sendError(clientId, 'Turns array is required for send_client_content');
+      }
+      
+      const client = this.clients.get(clientId);
+      const sessionData = client.sessions.get(sessionId);
+      
+      if (!sessionData) {
+        console.log(`❌ Session ${sessionId} not found for send_client_content. Available sessions:`, Array.from(client.sessions.keys()));
+        return this.sendError(clientId, `Session ${sessionId} not found`);
+      }
+
+      sessionData.lastActivity = new Date();
+
+      console.log(`[Live Backend] Received send_client_content from client ${clientId}. Sending via sendClientContent.`);
+      
+      // Send content directly to the live session via sendClientContent
+      await sessionData.session.sendClientContent({
+        turns,
+        turnComplete
+      });
+
+      console.log(`[Live Backend] Sent client content via sendClientContent for session ${sessionData.id}.`);
+
+      // Buffer user message for conversation saving
+      const sessionInfo = this.sessionManager.getSession(sessionId);
+      if (sessionInfo && sessionInfo.conversationId && turns.length > 0) {
+        try {
+          // Extract user message text from turns
+          const userTurn = turns.find(turn => turn.role === 'user');
+          if (userTurn && userTurn.parts) {
+            const textPart = userTurn.parts.find(part => part.text);
+            if (textPart) {
+              const userMessage = {
+                text: textPart.text,
+                role: 'user',
+                sessionId: sessionId
+              };
+
+              // Buffer user message instead of saving immediately
+              const clientSessionData = this.clients.get(clientId)?.sessions?.get(sessionId);
+              if (clientSessionData) {
+                clientSessionData.messageBuffer.push({
+                  conversationId: sessionInfo.conversationId,
+                  sessionId: sessionId,
+                  response: userMessage,
+                  timestamp: new Date()
+                });
+                console.log(`📦 Buffered user message from send_client_content (${clientSessionData.messageBuffer.length} messages pending)`);
+              }
+            }
+          }
+        } catch (saveError) {
+          console.error('Error buffering user message from send_client_content:', saveError);
+        }
+      }
+
+    } catch (error) {
+      console.error('Send client content error:', error);
+      this.sendError(clientId, `Failed to send client content: ${error.message}`);
+    }
+  }
+
+  /**
    * Handle realtime input (audio, video, images)
    */
   async handleRealtimeInput(clientId, message) {
@@ -930,6 +1013,7 @@ export class LiveApiServer {
         
         try {
           // Save all buffered messages
+          const messageCount = sessionData.messageBuffer.length;
           for (const bufferedMessage of sessionData.messageBuffer) {
             await LiveConversationService.saveLiveMessageToConversation(
               bufferedMessage.conversationId,
@@ -937,7 +1021,10 @@ export class LiveApiServer {
               bufferedMessage.response
             );
           }
-          console.log(`✅ Successfully saved ${sessionData.messageBuffer.length} messages on session end for conversation ${sessionData.conversationId}`);
+          console.log(`✅ Successfully saved ${messageCount} messages on session end for conversation ${sessionData.conversationId}`);
+          
+          // Clear buffer after saving
+          sessionData.messageBuffer = [];
         } catch (saveError) {
           console.error('❌ Error saving buffered messages on session end:', saveError);
         }
@@ -980,6 +1067,7 @@ export class LiveApiServer {
           
           try {
             // Save all buffered messages
+            const messageCount = sessionData.messageBuffer.length;
             for (const bufferedMessage of sessionData.messageBuffer) {
               await LiveConversationService.saveLiveMessageToConversation(
                 bufferedMessage.conversationId,
@@ -987,7 +1075,10 @@ export class LiveApiServer {
                 bufferedMessage.response
               );
             }
-            console.log(`✅ Successfully saved ${sessionData.messageBuffer.length} messages on disconnect for conversation ${sessionData.conversationId}`);
+            console.log(`✅ Successfully saved ${messageCount} messages on disconnect for conversation ${sessionData.conversationId}`);
+            
+            // Clear buffer after saving
+            sessionData.messageBuffer = [];
           } catch (saveError) {
             console.error('❌ Error saving buffered messages on client disconnect:', saveError);
           }
