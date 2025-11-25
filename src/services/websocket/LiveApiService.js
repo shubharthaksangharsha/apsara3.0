@@ -121,6 +121,9 @@ export class LiveApiService {
         case 'send_video':
           await this.handleSendVideo(clientId, message);
           break;
+        case 'send_context':
+          await this.handleSendContext(clientId, message);
+          break;
         case 'end_session':
           await this.handleEndSession(clientId, message);
           break;
@@ -691,6 +694,46 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     } catch (error) {
       console.error('Send video error:', error);
       // Don't spam errors for video frames - just log
+    }
+  }
+
+  /**
+   * Handle sending conversation context (incremental updates)
+   * This loads previous conversation history into the Gemini session
+   */
+  async handleSendContext(clientId, message) {
+    const client = this.clients.get(clientId);
+    if (!client?.session) {
+      return this.sendError(clientId, 'No active session');
+    }
+
+    const { turns, turnComplete = true } = message.data || {};
+    if (!turns || !Array.isArray(turns) || turns.length === 0) {
+      console.log('📝 No context turns to send');
+      return;
+    }
+
+    try {
+      console.log(`📝 Sending ${turns.length} conversation context turns to Gemini`);
+      
+      // Send conversation history using sendClientContent
+      await client.session.geminiSession.sendClientContent({
+        turns: turns,
+        turnComplete: turnComplete
+      });
+      
+      console.log(`✅ Conversation context loaded successfully`);
+      
+      // Notify client that context was loaded
+      this.sendToClient(clientId, {
+        type: 'context_loaded',
+        messageCount: turns.length,
+        timestamp: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      console.error('Send context error:', error);
+      this.sendError(clientId, `Failed to load context: ${error.message}`);
     }
   }
 
