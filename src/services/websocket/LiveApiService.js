@@ -417,12 +417,14 @@ export class LiveApiService {
   }
 
   /**
-   * Get transcription - just return the latest fragment as-is
-   * Gemini sends complete transcription each time, not fragments to merge
+   * Accumulate transcription by concatenating fragments
+   * Gemini sends small fragments that need to be joined together
    */
   accumulateTranscription(current, fragment) {
-    // Just return the latest fragment - Gemini sends full text each time
-    return fragment || '';
+    if (!fragment) return current || '';
+    if (!current) return fragment;
+    // Concatenate fragments - Gemini sends small chunks
+    return current + fragment;
   }
 
   /**
