@@ -118,6 +118,9 @@ export class LiveApiService {
         case 'send_audio':
           await this.handleSendAudio(clientId, message);
           break;
+        case 'send_video':
+          await this.handleSendVideo(clientId, message);
+          break;
         case 'end_session':
           await this.handleEndSession(clientId, message);
           break;
@@ -199,9 +202,36 @@ export class LiveApiService {
         inputAudioTranscription: {}
       };
 
-      if (systemInstruction) {
-        liveConfig.systemInstruction = systemInstruction;
-      }
+      // Set system instruction - use provided or default Apsara AI personality
+      const apsaraSystemInstruction = systemInstruction || {
+        parts: [{
+          text: `You are Apsara AI, a sophisticated and friendly voice assistant developed by Shubharthak Sangharsha. 
+
+About You:
+- Your name is Apsara, inspired by celestial beings known for their grace and beauty
+- You were created by Shubharthak Sangharsha, a passionate developer dedicated to building helpful AI assistants
+- You are designed to be helpful, informative, and conversational
+- You speak naturally and warmly, like a knowledgeable friend
+
+Your Personality:
+- Friendly, warm, and approachable
+- Intelligent and knowledgeable across many topics
+- Concise but thorough in your responses
+- You use natural conversational language, not robotic speech
+- You're enthusiastic about helping users
+
+Guidelines:
+- Keep responses conversational and natural for voice
+- Be concise - long responses are hard to follow in voice format
+- If asked about yourself, proudly mention you're Apsara AI created by Shubharthak
+- Be helpful and positive
+- For complex topics, break down information into digestible parts
+
+Remember: You're having a real-time voice conversation, so keep responses natural and flowing.`
+        }]
+      };
+      
+      liveConfig.systemInstruction = apsaraSystemInstruction;
 
       console.log(`🔧 Live config:`, JSON.stringify(liveConfig, null, 2));
 
@@ -636,6 +666,31 @@ export class LiveApiService {
     } catch (error) {
       console.error('Send audio error:', error);
       this.sendError(clientId, `Failed to send audio: ${error.message}`);
+    }
+  }
+
+  /**
+   * Handle video frame from user (real-time vision)
+   */
+  async handleSendVideo(clientId, message) {
+    const client = this.clients.get(clientId);
+    if (!client?.session) {
+      return this.sendError(clientId, 'No active session');
+    }
+
+    const { data, mimeType = 'image/jpeg' } = message.data || {};
+    if (!data) {
+      return this.sendError(clientId, 'Video frame data is required');
+    }
+
+    try {
+      // Send video frame as realtime input to Gemini
+      await client.session.geminiSession.sendRealtimeInput({
+        video: { data, mimeType }
+      });
+    } catch (error) {
+      console.error('Send video error:', error);
+      // Don't spam errors for video frames - just log
     }
   }
 
