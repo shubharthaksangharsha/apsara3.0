@@ -219,6 +219,11 @@ export class GoogleProvider extends BaseProvider {
         validConfig.outputAudioTranscription = config.outputAudioTranscription;
       }
       
+      // Include inputAudioTranscription if present (even if empty object - this enables it)
+      if (config.inputAudioTranscription !== undefined) {
+        validConfig.inputAudioTranscription = config.inputAudioTranscription;
+      }
+      
       // Only include other properties if they're actually needed
       if (config.systemInstruction) validConfig.systemInstruction = config.systemInstruction;
       if (config.tools && Array.isArray(config.tools) && config.tools.length > 0) {

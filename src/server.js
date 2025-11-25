@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 // Import configurations and services
 import DatabaseConfig from './config/database.js';
 import ProviderManager from './providers/ProviderManager.js';
-import { setupWebSocketServer } from './services/websocket/liveApiServer.js';
+import { setupLiveApiServer } from './services/websocket/LiveApiService.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { rateLimiter } from './middleware/rateLimiter.js';
 
@@ -126,7 +126,7 @@ class ApsaraServer {
   }
 
   async setupWebSocket() {
-    await setupWebSocketServer(this.wss);
+    await setupLiveApiServer(this.wss);
   }
 
   setupErrorHandling() {
