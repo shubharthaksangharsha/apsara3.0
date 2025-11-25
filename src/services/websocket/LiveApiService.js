@@ -399,46 +399,19 @@ export class LiveApiService {
   }
 
   /**
-   * Accumulate transcription fragments into complete text
+   * Accumulate transcription fragments - keep latest fragment as-is
+   * The Gemini API sends complete transcription each time, not fragments to merge
    */
   accumulateTranscription(current, fragment) {
-    const trimmedFragment = fragment.trim();
-    if (!trimmedFragment) return current;
-
-    if (!current) return trimmedFragment;
-
-    // Check if fragment is expansion of current
-    if (trimmedFragment.startsWith(current)) {
-      return trimmedFragment;
-    }
-
-    // Check if current ends with punctuation/space
-    if (/[\s.,!?;:]$/.test(current)) {
-      return current + trimmedFragment;
-    }
-
-    // Check if fragment is short word continuation
-    if (trimmedFragment.length < 15 && !/\s/.test(trimmedFragment)) {
-      const endsWithLetter = /[a-zA-Z]$/.test(current);
-      const startsWithLetter = /^[a-zA-Z]/.test(trimmedFragment);
-      if (endsWithLetter && startsWithLetter) {
-        return current + trimmedFragment;
-      }
-    }
-
-    // Default: add with space
-    return current + ' ' + trimmedFragment;
+    // Simply return the latest fragment as-is - Gemini sends complete transcriptions
+    return fragment || current || '';
   }
 
   /**
-   * Normalize accumulated transcription text
+   * Keep transcription text as-is, no normalization
    */
   normalizeTranscription(text) {
-    if (!text) return '';
-    return text
-      .replace(/\s+/g, ' ')           // Multiple spaces to single
-      .replace(/\s+([.,!?;:])/g, '$1') // Remove space before punctuation
-      .trim();
+    return text || '';
   }
 
   /**
@@ -556,20 +529,69 @@ export class LiveApiService {
     }
 
     try {
+      // Save the user text message to conversation immediately
+      await this.saveUserTextMessage(clientId, text);
+
       // Send text to Gemini via sendClientContent
       await client.session.geminiSession.sendClientContent({
         turns: [{ role: 'user', parts: [{ text }] }],
         turnComplete: true
       });
 
-      // Store the text as pending user message (will be saved if no transcription comes)
-      client.session.pendingUserText = text;
-
       console.log(`📤 Sent text to Gemini: "${text.substring(0, 50)}..."`);
 
     } catch (error) {
       console.error('Send text error:', error);
       this.sendError(clientId, `Failed to send text: ${error.message}`);
+    }
+  }
+
+  /**
+   * Save user text message to conversation
+   */
+  async saveUserTextMessage(clientId, text) {
+    const client = this.clients.get(clientId);
+    if (!client?.session) return;
+
+    const session = client.session;
+    const conversationId = session.conversationId;
+
+    try {
+      const conversation = await Conversation.findOne({ conversationId });
+      if (!conversation) return;
+
+      const messageSequence = conversation.getNextMessageSequence();
+      await conversation.save();
+
+      const userMessage = new Message({
+        messageId: uuidv4(),
+        conversationId,
+        userId: session.userId,
+        messageSequence,
+        messageType: 'live',
+        role: 'user',
+        content: { text },
+        config: {
+          live: {
+            model: session.model,
+            sessionId: session.id,
+            responseModalities: ['AUDIO'],
+            inputType: 'text'
+          }
+        },
+        status: 'completed',
+        metadata: {
+          timing: { requestTime: new Date() },
+          provider: { name: 'google', sessionId: session.id }
+        }
+      });
+
+      await userMessage.save();
+      await conversation.incrementStats('live');
+      console.log(`💾 Saved USER TEXT: "${text.substring(0, 50)}..."`);
+
+    } catch (error) {
+      console.error('Error saving user text message:', error);
     }
   }
 
