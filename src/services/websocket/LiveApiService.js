@@ -417,25 +417,12 @@ export class LiveApiService {
   }
 
   /**
-   * Accumulate transcription fragments properly
-   * Gemini sends incremental transcriptions that need to be accumulated
+   * Get transcription - just return the latest fragment as-is
+   * Gemini sends complete transcription each time, not fragments to merge
    */
   accumulateTranscription(current, fragment) {
-    if (!fragment) return current || '';
-    if (!current) return fragment;
-    
-    // If the new fragment is longer and starts similarly, it's likely an expansion
-    if (fragment.length > current.length && fragment.toLowerCase().includes(current.toLowerCase().substring(0, Math.min(10, current.length)))) {
-      return fragment;
-    }
-    
-    // If the fragment starts with the current text, it's an expansion
-    if (fragment.startsWith(current)) {
-      return fragment;
-    }
-    
-    // Otherwise, this might be a continuation - append with space
-    return current + ' ' + fragment;
+    // Just return the latest fragment - Gemini sends full text each time
+    return fragment || '';
   }
 
   /**
