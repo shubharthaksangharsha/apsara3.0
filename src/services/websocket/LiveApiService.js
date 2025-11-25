@@ -293,6 +293,7 @@ export class LiveApiService {
     if (!client?.session) return;
 
     const session = client.session;
+    let audioSent = false; // Track if we've already sent audio for this message
 
     // Handle input transcription (user speech)
     if (response.serverContent?.inputTranscription?.text) {
@@ -301,6 +302,8 @@ export class LiveApiService {
         session.currentInputTranscription,
         text
       );
+      
+      console.log(`📝 Input transcription: "${session.currentInputTranscription}"`);
       
       this.sendToClient(clientId, {
         type: 'input_transcription',
@@ -319,6 +322,8 @@ export class LiveApiService {
         text
       );
       
+      console.log(`📝 Output transcription: "${session.currentOutputTranscription}"`);
+      
       this.sendToClient(clientId, {
         type: 'output_transcription',
         sessionId,
@@ -328,8 +333,9 @@ export class LiveApiService {
       });
     }
 
-    // Handle audio data - forward to client for playback
-    if (response.data) {
+    // Handle audio data - ONLY from response.data (main audio stream)
+    // Don't also send from modelTurn.parts to avoid echoing/duplicate
+    if (response.data && !audioSent) {
       this.sendToClient(clientId, {
         type: 'audio_data',
         sessionId,
@@ -337,12 +343,13 @@ export class LiveApiService {
         mimeType: 'audio/pcm;rate=24000',
         timestamp: new Date().toISOString()
       });
+      audioSent = true;
     }
 
-    // Handle modelTurn with audio
-    if (response.serverContent?.modelTurn?.parts) {
+    // Handle modelTurn with audio - ONLY if we haven't sent audio yet
+    if (response.serverContent?.modelTurn?.parts && !audioSent) {
       for (const part of response.serverContent.modelTurn.parts) {
-        if (part.inlineData?.mimeType?.startsWith('audio/')) {
+        if (part.inlineData?.mimeType?.startsWith('audio/') && !audioSent) {
           this.sendToClient(clientId, {
             type: 'audio_data',
             sessionId,
@@ -350,12 +357,15 @@ export class LiveApiService {
             mimeType: part.inlineData.mimeType,
             timestamp: new Date().toISOString()
           });
+          audioSent = true;
+          break; // Only send one audio chunk per message
         }
       }
     }
 
     // Handle turn complete - save accumulated transcriptions
     if (response.serverContent?.turnComplete) {
+      console.log(`✅ Turn complete - Input: "${session.currentInputTranscription}", Output: "${session.currentOutputTranscription}"`);
       await this.saveTurnMessages(clientId, sessionId);
       
       this.sendToClient(clientId, {
@@ -367,6 +377,13 @@ export class LiveApiService {
 
     // Handle generation complete
     if (response.serverContent?.generationComplete) {
+      console.log(`✅ Generation complete - Final output transcription: "${session.currentOutputTranscription}"`);
+      
+      // Save any remaining transcriptions on generation complete
+      if (session.currentOutputTranscription || session.currentInputTranscription) {
+        await this.saveTurnMessages(clientId, sessionId);
+      }
+      
       this.sendToClient(clientId, {
         type: 'generation_complete',
         sessionId,
@@ -376,6 +393,7 @@ export class LiveApiService {
 
     // Handle interruption
     if (response.serverContent?.interrupted) {
+      console.log(`⚠️ Interrupted - clearing transcriptions`);
       // Clear current transcriptions on interrupt
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
@@ -399,12 +417,25 @@ export class LiveApiService {
   }
 
   /**
-   * Accumulate transcription fragments - keep latest fragment as-is
-   * The Gemini API sends complete transcription each time, not fragments to merge
+   * Accumulate transcription fragments properly
+   * Gemini sends incremental transcriptions that need to be accumulated
    */
   accumulateTranscription(current, fragment) {
-    // Simply return the latest fragment as-is - Gemini sends complete transcriptions
-    return fragment || current || '';
+    if (!fragment) return current || '';
+    if (!current) return fragment;
+    
+    // If the new fragment is longer and starts similarly, it's likely an expansion
+    if (fragment.length > current.length && fragment.toLowerCase().includes(current.toLowerCase().substring(0, Math.min(10, current.length)))) {
+      return fragment;
+    }
+    
+    // If the fragment starts with the current text, it's an expansion
+    if (fragment.startsWith(current)) {
+      return fragment;
+    }
+    
+    // Otherwise, this might be a continuation - append with space
+    return current + ' ' + fragment;
   }
 
   /**
