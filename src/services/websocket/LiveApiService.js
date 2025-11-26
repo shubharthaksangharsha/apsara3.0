@@ -334,13 +334,38 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         model
       });
 
-      // NOTE: Predefined conversation context loading is disabled for now
-      // The sendClientContent with context causes Gemini to close the session
-      // This needs further investigation on proper context format
+      // Send predefined conversation context if available
+      // Using turnComplete: false so Gemini doesn't respond - just establishes context
       if (client.pendingContext && client.pendingContext.length > 0) {
-        console.log(`ℹ️ Skipping context load (${client.pendingContext.length} turns) - feature disabled`);
-        console.log(`ℹ️ Context would have been: ${JSON.stringify(client.pendingContext.slice(0, 2), null, 2)}...`);
+        const contextToSend = [...client.pendingContext];
         delete client.pendingContext;
+        
+        // Send context after a short delay to ensure session is stable
+        setTimeout(async () => {
+          try {
+            if (client.session?.geminiSession) {
+              console.log(`📤 Sending ${contextToSend.length} context turns to Gemini (turnComplete: false)`);
+              
+              // Send context WITHOUT triggering a response
+              await client.session.geminiSession.sendClientContent({
+                turns: contextToSend,
+                turnComplete: false  // CRITICAL: Don't trigger response, just load context
+              });
+              
+              console.log(`✅ Context loaded into Gemini session - ready for user input`);
+              
+              // Notify client that context is loaded
+              this.sendToClient(clientId, {
+                type: 'context_loaded',
+                count: contextToSend.length,
+                timestamp: new Date().toISOString()
+              });
+            }
+          } catch (contextError) {
+            console.error('Error sending context to Gemini:', contextError.message);
+            // Don't crash the session - just log and continue
+          }
+        }, 500);
       }
 
       this.sendToClient(clientId, {
