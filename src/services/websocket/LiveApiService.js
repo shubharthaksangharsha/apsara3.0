@@ -229,7 +229,9 @@ export class LiveApiService {
         },
         // Enable transcriptions - this is key for saving conversation history
         outputAudioTranscription: {},
-        inputAudioTranscription: {}
+        inputAudioTranscription: {},
+        // Use LOW media resolution for faster video/image processing
+        mediaResolution: 'MEDIA_RESOLUTION_LOW'
       };
 
       // Build conversation context summary for system instruction
