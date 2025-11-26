@@ -335,18 +335,27 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       });
 
       // Send pending context if we have it (for existing conversations)
+      // Do this asynchronously so it doesn't block session creation
       if (client.pendingContext && client.pendingContext.length > 0) {
-        try {
-          console.log(`📤 Sending ${client.pendingContext.length} context turns to Gemini`);
-          await client.session.geminiSession.sendClientContent({
-            turns: client.pendingContext,
-            turnComplete: true
-          });
-          console.log(`✅ Context loaded into Gemini session`);
-          delete client.pendingContext;
-        } catch (contextError) {
-          console.error('Error sending context to Gemini:', contextError);
-        }
+        const contextToSend = [...client.pendingContext];
+        delete client.pendingContext; // Clear immediately to avoid re-sending
+        
+        // Send context in background after a short delay
+        setTimeout(async () => {
+          try {
+            if (client.session?.geminiSession) {
+              console.log(`📤 Sending ${contextToSend.length} context turns to Gemini`);
+              await client.session.geminiSession.sendClientContent({
+                turns: contextToSend,
+                turnComplete: true
+              });
+              console.log(`✅ Context loaded into Gemini session`);
+            }
+          } catch (contextError) {
+            console.error('Error sending context to Gemini:', contextError.message);
+            // Don't let this crash the session
+          }
+        }, 500); // Wait 500ms for session to stabilize
       }
 
       this.sendToClient(clientId, {
