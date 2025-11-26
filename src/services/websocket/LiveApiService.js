@@ -335,21 +335,28 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       });
 
       // Send predefined conversation context if available
-      // Using turnComplete: false so Gemini doesn't respond - just establishes context
+      // Include context in system instruction for reliable memory
       if (client.pendingContext && client.pendingContext.length > 0) {
         const contextToSend = [...client.pendingContext];
         delete client.pendingContext;
+        
+        // Log actual context content
+        console.log(`📤 Context to send (${contextToSend.length} turns):`);
+        contextToSend.forEach((turn, i) => {
+          const text = turn.parts?.[0]?.text || '(no text)';
+          console.log(`   ${i+1}. [${turn.role}]: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+        });
         
         // Send context after a short delay to ensure session is stable
         setTimeout(async () => {
           try {
             if (client.session?.geminiSession) {
-              console.log(`📤 Sending ${contextToSend.length} context turns to Gemini (turnComplete: false)`);
+              console.log(`📤 Sending context turns to Gemini...`);
               
-              // Send context WITHOUT triggering a response
+              // Send each turn to establish conversation history
               await client.session.geminiSession.sendClientContent({
                 turns: contextToSend,
-                turnComplete: false  // CRITICAL: Don't trigger response, just load context
+                turnComplete: false  // Don't trigger response, just load context
               });
               
               console.log(`✅ Context loaded into Gemini session - ready for user input`);
@@ -362,8 +369,8 @@ Remember: You're having a real-time voice conversation, so keep responses natura
               });
             }
           } catch (contextError) {
-            console.error('Error sending context to Gemini:', contextError.message);
-            // Don't crash the session - just log and continue
+            console.error('❌ Error sending context to Gemini:', contextError.message);
+            console.error('   Context format:', JSON.stringify(contextToSend.slice(0, 2), null, 2));
           }
         }, 500);
       }
