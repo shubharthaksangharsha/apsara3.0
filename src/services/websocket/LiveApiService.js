@@ -266,6 +266,8 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       console.log(`🔧 Live config:`, JSON.stringify(liveConfig, null, 2));
 
       // Create Gemini Live session
+      // Note: We need to send context AFTER the session is stored, not in onopen
+      // because liveSession isn't assigned yet during the callback
       const liveSession = await ProviderManager.createLiveSession({
         model,
         provider: 'google',
@@ -274,20 +276,26 @@ Remember: You're having a real-time voice conversation, so keep responses natura
           onopen: async () => {
             console.log(`🟢 Gemini session opened: ${sessionId}`);
             
-            // Send pending context if we have it (for existing conversations)
+            // Send pending context after a short delay to ensure session is stored
             const clientData = this.clients.get(clientId);
             if (clientData?.pendingContext && clientData.pendingContext.length > 0) {
-              try {
-                console.log(`📤 Sending ${clientData.pendingContext.length} context turns to Gemini`);
-                await liveSession.sendClientContent({
-                  turns: clientData.pendingContext,
-                  turnComplete: true
-                });
-                console.log(`✅ Context loaded into Gemini session`);
-                delete clientData.pendingContext; // Clear after sending
-              } catch (contextError) {
-                console.error('Error sending context to Gemini:', contextError);
-              }
+              // Schedule context sending after session is fully set up
+              setTimeout(async () => {
+                try {
+                  const session = this.sessions.get(sessionId);
+                  if (session?.geminiSession) {
+                    console.log(`📤 Sending ${clientData.pendingContext.length} context turns to Gemini`);
+                    await session.geminiSession.sendClientContent({
+                      turns: clientData.pendingContext,
+                      turnComplete: true
+                    });
+                    console.log(`✅ Context loaded into Gemini session`);
+                    delete clientData.pendingContext;
+                  }
+                } catch (contextError) {
+                  console.error('Error sending context to Gemini:', contextError);
+                }
+              }, 100);
             }
             
             this.sendToClient(clientId, {
