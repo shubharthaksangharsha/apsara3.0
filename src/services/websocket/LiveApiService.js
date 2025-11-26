@@ -232,6 +232,19 @@ export class LiveApiService {
         inputAudioTranscription: {}
       };
 
+      // Build conversation context summary for system instruction
+      let contextSummary = '';
+      if (client.pendingContext && client.pendingContext.length > 0) {
+        console.log(`📤 Including ${client.pendingContext.length} context turns in system instruction`);
+        contextSummary = '\n\n=== PREVIOUS CONVERSATION HISTORY ===\nThe user has spoken with you before. Here is the conversation history:\n';
+        client.pendingContext.forEach((turn, i) => {
+          const role = turn.role === 'user' ? 'User' : 'You (Apsara)';
+          const text = turn.parts?.[0]?.text || '';
+          contextSummary += `\n${role}: ${text}`;
+        });
+        contextSummary += '\n\n=== END OF HISTORY ===\nContinue the conversation naturally. If the user asks about previous discussions, refer to the history above.\n';
+      }
+
       // Set system instruction - use provided or default Apsara AI personality
       const apsaraSystemInstruction = systemInstruction || {
         parts: [{
@@ -257,11 +270,14 @@ Guidelines:
 - Be helpful and positive
 - For complex topics, break down information into digestible parts
 
-Remember: You're having a real-time voice conversation, so keep responses natural and flowing.`
+Remember: You're having a real-time voice conversation, so keep responses natural and flowing.${contextSummary}`
         }]
       };
       
       liveConfig.systemInstruction = apsaraSystemInstruction;
+      
+      // Add Google Search tool for real-time information
+      liveConfig.tools = [{ googleSearch: {} }];
 
       console.log(`🔧 Live config:`, JSON.stringify(liveConfig, null, 2));
 
@@ -334,45 +350,17 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         model
       });
 
-      // Send predefined conversation context if available
-      // Include context in system instruction for reliable memory
+      // Context is already included in the system instruction above
+      // Just notify client that context is ready
       if (client.pendingContext && client.pendingContext.length > 0) {
-        const contextToSend = [...client.pendingContext];
+        console.log(`📚 ${client.pendingContext.length} context turns already included in system instruction`);
         delete client.pendingContext;
         
-        // Log actual context content
-        console.log(`📤 Context to send (${contextToSend.length} turns):`);
-        contextToSend.forEach((turn, i) => {
-          const text = turn.parts?.[0]?.text || '(no text)';
-          console.log(`   ${i+1}. [${turn.role}]: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+        this.sendToClient(clientId, {
+          type: 'context_loaded',
+          count: client.pendingContext?.length || 0,
+          timestamp: new Date().toISOString()
         });
-        
-        // Send context after a short delay to ensure session is stable
-        setTimeout(async () => {
-          try {
-            if (client.session?.geminiSession) {
-              console.log(`📤 Sending context turns to Gemini...`);
-              
-              // Send each turn to establish conversation history
-              await client.session.geminiSession.sendClientContent({
-                turns: contextToSend,
-                turnComplete: false  // Don't trigger response, just load context
-              });
-              
-              console.log(`✅ Context loaded into Gemini session - ready for user input`);
-              
-              // Notify client that context is loaded
-              this.sendToClient(clientId, {
-                type: 'context_loaded',
-                count: contextToSend.length,
-                timestamp: new Date().toISOString()
-              });
-            }
-          } catch (contextError) {
-            console.error('❌ Error sending context to Gemini:', contextError.message);
-            console.error('   Context format:', JSON.stringify(contextToSend.slice(0, 2), null, 2));
-          }
-        }, 500);
       }
 
       this.sendToClient(clientId, {
