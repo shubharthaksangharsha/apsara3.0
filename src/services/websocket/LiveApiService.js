@@ -747,6 +747,15 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     try {
+      // Track frame count for debugging
+      if (!client.videoFrameCount) client.videoFrameCount = 0;
+      client.videoFrameCount++;
+      
+      // Log every 5th frame to confirm continuous streaming
+      if (client.videoFrameCount % 5 === 0) {
+        console.log(`📹 Received video frame #${client.videoFrameCount} (${Math.round(data.length / 1024)}KB)`);
+      }
+      
       // Send video frame as realtime input to Gemini
       await client.session.geminiSession.sendRealtimeInput({
         video: { data, mimeType }
