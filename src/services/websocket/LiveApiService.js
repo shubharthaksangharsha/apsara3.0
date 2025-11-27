@@ -354,144 +354,60 @@ Remember: You're having a real-time voice conversation, so keep responses natura
   }
 
   /**
-   * Handle Gemini Live API messages
-   * Processes transcriptions and audio data
+   * Handle Gemini Live API messages - optimized for low latency
    */
   async handleGeminiMessage(clientId, sessionId, response) {
     const client = this.clients.get(clientId);
     if (!client?.session) return;
 
     const session = client.session;
-    let audioSent = false; // Track if we've already sent audio for this message
+    const sc = response.serverContent;
 
-    // Handle input transcription (user speech)
-    if (response.serverContent?.inputTranscription?.text) {
-      const text = response.serverContent.inputTranscription.text;
-      session.currentInputTranscription = this.accumulateTranscription(
-        session.currentInputTranscription,
-        text
-      );
-      
-      this.sendToClient(clientId, {
-        type: 'input_transcription',
-        sessionId,
-        text: session.currentInputTranscription,
-        isPartial: true,
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Handle output transcription (AI speech)
-    if (response.serverContent?.outputTranscription?.text) {
-      const text = response.serverContent.outputTranscription.text;
-      session.currentOutputTranscription = this.accumulateTranscription(
-        session.currentOutputTranscription,
-        text
-      );
-      
-      this.sendToClient(clientId, {
-        type: 'output_transcription',
-        sessionId,
-        text: session.currentOutputTranscription,
-        isPartial: true,
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Handle audio data - ONLY from response.data (main audio stream)
-    // Don't also send from modelTurn.parts to avoid echoing/duplicate
-    if (response.data && !audioSent) {
-      this.sendToClient(clientId, {
-        type: 'audio_data',
-        sessionId,
-        data: response.data,
-        mimeType: 'audio/pcm;rate=24000',
-        timestamp: new Date().toISOString()
-      });
-      audioSent = true;
-    }
-
-    // Handle modelTurn with audio - ONLY if we haven't sent audio yet
-    if (response.serverContent?.modelTurn?.parts && !audioSent) {
-      for (const part of response.serverContent.modelTurn.parts) {
-        if (part.inlineData?.mimeType?.startsWith('audio/') && !audioSent) {
-          this.sendToClient(clientId, {
-            type: 'audio_data',
-            sessionId,
-            data: part.inlineData.data,
-            mimeType: part.inlineData.mimeType,
-            timestamp: new Date().toISOString()
-          });
-          audioSent = true;
-          break; // Only send one audio chunk per message
-        }
+    // Priority 1: Audio data - send immediately for lowest latency
+    if (response.data) {
+      this.sendToClient(clientId, { type: 'audio_data', sessionId, data: response.data });
+    } else if (sc?.modelTurn?.parts?.[0]?.inlineData?.data) {
+      const part = sc.modelTurn.parts[0];
+      if (part.inlineData.mimeType?.startsWith('audio/')) {
+        this.sendToClient(clientId, { type: 'audio_data', sessionId, data: part.inlineData.data });
       }
     }
 
-    // Handle turn complete - save accumulated transcriptions
-    if (response.serverContent?.turnComplete) {
-      await this.saveTurnMessages(clientId, sessionId);
-      
-      this.sendToClient(clientId, {
-        type: 'turn_complete',
-        sessionId,
-        timestamp: new Date().toISOString()
-      });
+    // Priority 2: Transcriptions
+    if (sc?.inputTranscription?.text) {
+      session.currentInputTranscription += sc.inputTranscription.text;
+      this.sendToClient(clientId, { type: 'input_transcription', sessionId, text: session.currentInputTranscription });
     }
 
-    // Handle generation complete
-    if (response.serverContent?.generationComplete) {
+    if (sc?.outputTranscription?.text) {
+      session.currentOutputTranscription += sc.outputTranscription.text;
+      this.sendToClient(clientId, { type: 'output_transcription', sessionId, text: session.currentOutputTranscription });
+    }
+
+    // Priority 3: Turn/Generation events - save async (don't block)
+    if (sc?.turnComplete) {
+      this.saveTurnMessages(clientId, sessionId); // No await - fire and forget
+      this.sendToClient(clientId, { type: 'turn_complete', sessionId });
+    }
+
+    if (sc?.generationComplete) {
       if (session.currentOutputTranscription || session.currentInputTranscription) {
-        await this.saveTurnMessages(clientId, sessionId);
+        this.saveTurnMessages(clientId, sessionId);
       }
-      
-      this.sendToClient(clientId, {
-        type: 'generation_complete',
-        sessionId,
-        timestamp: new Date().toISOString()
-      });
+      this.sendToClient(clientId, { type: 'generation_complete', sessionId });
     }
 
-    // Handle interruption
-    if (response.serverContent?.interrupted) {
+    if (sc?.interrupted) {
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
-      
-      this.sendToClient(clientId, {
-        type: 'interrupted',
-        sessionId,
-        timestamp: new Date().toISOString()
-      });
+      this.sendToClient(clientId, { type: 'interrupted', sessionId });
     }
 
-    // Handle go away (session ending)
     if (response.goAway) {
-      this.sendToClient(clientId, {
-        type: 'go_away',
-        sessionId,
-        timeLeft: response.goAway.timeLeft,
-        timestamp: new Date().toISOString()
-      });
+      this.sendToClient(clientId, { type: 'go_away', sessionId, timeLeft: response.goAway.timeLeft });
     }
   }
 
-  /**
-   * Accumulate transcription by concatenating fragments
-   * Gemini sends small fragments that need to be joined together
-   */
-  accumulateTranscription(current, fragment) {
-    if (!fragment) return current || '';
-    if (!current) return fragment;
-    // Concatenate fragments - Gemini sends small chunks
-    return current + fragment;
-  }
-
-  /**
-   * Keep transcription text as-is, no normalization
-   */
-  normalizeTranscription(text) {
-    return text || '';
-  }
 
   /**
    * Save turn messages (after turnComplete)
@@ -508,7 +424,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       if (!conversation) return;
 
       // Save input transcription as USER message
-      const inputText = this.normalizeTranscription(session.currentInputTranscription);
+      const inputText = session.currentInputTranscription?.trim();
       if (inputText) {
         const messageSequence = conversation.getNextMessageSequence();
         await conversation.save();
@@ -540,7 +456,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       }
 
       // Save output transcription as MODEL message
-      const outputText = this.normalizeTranscription(session.currentOutputTranscription);
+      const outputText = session.currentOutputTranscription?.trim();
       if (outputText) {
         const messageSequence = conversation.getNextMessageSequence();
         await conversation.save();
@@ -904,6 +820,9 @@ export async function setupLiveApiServer(wss) {
   });
 
   wss.getStats = () => liveApiService.getStats();
+
+  console.log('✅ Live API WebSocket server ready');
   return liveApiService;
 }
+
 
