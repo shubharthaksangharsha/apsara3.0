@@ -4,6 +4,7 @@ import ProviderManager from '../../providers/ProviderManager.js';
 import { LiveSessionManager } from './LiveSessionManager.js';
 import { Conversation, Message } from '../../models/index.js';
 import ConversationService from '../database/ConversationService.js';
+import {MediaResolution} from '@google/genai';
 
 /**
  * Live API Service
@@ -32,9 +33,7 @@ export class LiveApiService {
     try {
       this.sessionManager.startPeriodicCleanup();
       this.initialized = true;
-      console.log('✅ Live API Service initialized');
     } catch (error) {
-      console.error('❌ Failed to initialize Live API Service:', error);
       throw error;
     }
   }
@@ -55,8 +54,6 @@ export class LiveApiService {
       }));
       return;
     }
-
-    console.log(`🔌 New Live API connection: ${clientId}`);
 
     // Initialize client state
     const client = {
@@ -131,10 +128,9 @@ export class LiveApiService {
           this.sendToClient(clientId, { type: 'pong', timestamp: new Date().toISOString() });
           break;
         default:
-          console.log(`Unknown message type: ${message.type}`);
+          // Unknown message type - ignore
       }
     } catch (error) {
-      console.error(`Message error for client ${clientId}:`, error);
       this.sendError(clientId, error.message);
     }
   }
@@ -161,8 +157,6 @@ export class LiveApiService {
       const client = this.clients.get(clientId);
       const sessionId = uuidv4();
 
-      console.log(`📝 Creating Live session: ${sessionId}`);
-      console.log(`   User: ${userId}, ConversationId: ${conversationId || 'new'}`);
 
       // Create or get conversation
       let finalConversationId = conversationId;
@@ -173,7 +167,6 @@ export class LiveApiService {
           responseModalities: ['AUDIO']
         });
         finalConversationId = conversation.conversationId;
-        console.log(`✅ Created new conversation: ${finalConversationId}`);
       } else {
         // Verify conversation exists
         const conversation = await Conversation.findOne({ conversationId });
@@ -185,7 +178,6 @@ export class LiveApiService {
         conversation.session.liveSessionId = sessionId;
         conversation.session.isLiveActive = true;
         await conversation.save();
-        console.log(`✅ Using existing conversation: ${finalConversationId}`);
         
         // Load existing messages to send as context
         try {
@@ -204,13 +196,10 @@ export class LiveApiService {
               }));
             
             if (contextTurns.length > 0) {
-              // Store context to send after session is ready
               client.pendingContext = contextTurns;
-              console.log(`📚 Loaded ${contextTurns.length} messages as context for Gemini`);
             }
           }
         } catch (contextError) {
-          console.error('Error loading conversation context:', contextError);
           // Continue without context - non-fatal error
         }
       }
@@ -231,13 +220,12 @@ export class LiveApiService {
         outputAudioTranscription: {},
         inputAudioTranscription: {},
         // Use LOW media resolution for faster video/image processing
-        mediaResolution: 'MEDIA_RESOLUTION_LOW'
+        mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW
       };
 
       // Build conversation context summary for system instruction
       let contextSummary = '';
       if (client.pendingContext && client.pendingContext.length > 0) {
-        console.log(`📤 Including ${client.pendingContext.length} context turns in system instruction`);
         contextSummary = '\n\n=== PREVIOUS CONVERSATION HISTORY ===\nThe user has spoken with you before. Here is the conversation history:\n';
         client.pendingContext.forEach((turn, i) => {
           const role = turn.role === 'user' ? 'User' : 'You (Apsara)';
@@ -281,8 +269,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       // Add Google Search tool for real-time information
       liveConfig.tools = [{ googleSearch: {} }];
 
-      console.log(`🔧 Live config:`, JSON.stringify(liveConfig, null, 2));
-
       // Create Gemini Live session
       // Note: We need to send context AFTER the session is stored, not in onopen
       // because liveSession isn't assigned yet during the callback
@@ -292,9 +278,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         config: liveConfig,
         callbacks: {
           onopen: async () => {
-            console.log(`🟢 Gemini session opened: ${sessionId}`);
-            
-            // First notify client that session is ready
             this.sendToClient(clientId, {
               type: 'session_ready',
               sessionId,
@@ -308,7 +291,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
           },
           
           onerror: (error) => {
-            console.error(`🔴 Gemini session error: ${sessionId}`, error);
             this.sendToClient(clientId, {
               type: 'session_error',
               sessionId,
@@ -318,7 +300,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
           },
           
           onclose: async (reason) => {
-            console.log(`🔴 Gemini session closed: ${sessionId}`);
             await this.saveSessionMessages(clientId, sessionId);
             this.sendToClient(clientId, {
               type: 'session_closed',
@@ -352,17 +333,11 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         model
       });
 
-      // Context is already included in the system instruction above
-      // Just notify client that context is ready
+      // Context already included in system instruction
       if (client.pendingContext && client.pendingContext.length > 0) {
-        console.log(`📚 ${client.pendingContext.length} context turns already included in system instruction`);
+        const count = client.pendingContext.length;
         delete client.pendingContext;
-        
-        this.sendToClient(clientId, {
-          type: 'context_loaded',
-          count: client.pendingContext?.length || 0,
-          timestamp: new Date().toISOString()
-        });
+        this.sendToClient(clientId, { type: 'context_loaded', count, timestamp: new Date().toISOString() });
       }
 
       this.sendToClient(clientId, {
@@ -374,7 +349,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       });
 
     } catch (error) {
-      console.error('Create session error:', error);
       this.sendError(clientId, `Failed to create session: ${error.message}`);
     }
   }
@@ -398,8 +372,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         text
       );
       
-      console.log(`📝 Input transcription: "${session.currentInputTranscription}"`);
-      
       this.sendToClient(clientId, {
         type: 'input_transcription',
         sessionId,
@@ -416,8 +388,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         session.currentOutputTranscription,
         text
       );
-      
-      console.log(`📝 Output transcription: "${session.currentOutputTranscription}"`);
       
       this.sendToClient(clientId, {
         type: 'output_transcription',
@@ -460,7 +430,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
     // Handle turn complete - save accumulated transcriptions
     if (response.serverContent?.turnComplete) {
-      console.log(`✅ Turn complete - Input: "${session.currentInputTranscription}", Output: "${session.currentOutputTranscription}"`);
       await this.saveTurnMessages(clientId, sessionId);
       
       this.sendToClient(clientId, {
@@ -472,9 +441,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
     // Handle generation complete
     if (response.serverContent?.generationComplete) {
-      console.log(`✅ Generation complete - Final output transcription: "${session.currentOutputTranscription}"`);
-      
-      // Save any remaining transcriptions on generation complete
       if (session.currentOutputTranscription || session.currentInputTranscription) {
         await this.saveTurnMessages(clientId, sessionId);
       }
@@ -488,8 +454,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
     // Handle interruption
     if (response.serverContent?.interrupted) {
-      console.log(`⚠️ Interrupted - clearing transcriptions`);
-      // Clear current transcriptions on interrupt
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
       
@@ -573,7 +537,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
         await userMessage.save();
         await conversation.incrementStats('live');
-        console.log(`💾 Saved USER message: "${inputText.substring(0, 50)}..."`);
       }
 
       // Save output transcription as MODEL message
@@ -606,7 +569,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
         await modelMessage.save();
         await conversation.incrementStats('live');
-        console.log(`💾 Saved MODEL message: "${outputText.substring(0, 50)}..."`);
       }
 
       // Clear accumulators for next turn
@@ -614,7 +576,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       session.currentOutputTranscription = '';
 
     } catch (error) {
-      console.error('Error saving turn messages:', error);
+      // Error saving turn messages
     }
   }
 
@@ -652,11 +614,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         turns: [{ role: 'user', parts: [{ text }] }],
         turnComplete: true
       });
-
-      console.log(`📤 Sent text to Gemini: "${text.substring(0, 50)}..."`);
-
     } catch (error) {
-      console.error('Send text error:', error);
       this.sendError(clientId, `Failed to send text: ${error.message}`);
     }
   }
@@ -703,10 +661,8 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
       await userMessage.save();
       await conversation.incrementStats('live');
-      console.log(`💾 Saved USER TEXT: "${text.substring(0, 50)}..."`);
-
     } catch (error) {
-      console.error('Error saving user text message:', error);
+      // Error saving user text
     }
   }
 
@@ -729,8 +685,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         audio: { data, mimeType }
       });
     } catch (error) {
-      console.error('Send audio error:', error);
-      this.sendError(clientId, `Failed to send audio: ${error.message}`);
+      // Audio send error - don't spam client
     }
   }
 
@@ -749,22 +704,11 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     try {
-      // Track frame count for debugging
-      if (!client.videoFrameCount) client.videoFrameCount = 0;
-      client.videoFrameCount++;
-      
-      // Log every 5th frame to confirm continuous streaming
-      if (client.videoFrameCount % 5 === 0) {
-        console.log(`📹 Received video frame #${client.videoFrameCount} (${Math.round(data.length / 1024)}KB)`);
-      }
-      
-      // Send video frame as realtime input to Gemini
       await client.session.geminiSession.sendRealtimeInput({
         video: { data, mimeType }
       });
     } catch (error) {
-      console.error('Send video error:', error);
-      // Don't spam errors for video frames - just log
+      // Video send error - silent
     }
   }
 
@@ -779,31 +723,20 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     const { turns, turnComplete = true } = message.data || {};
-    if (!turns || !Array.isArray(turns) || turns.length === 0) {
-      console.log('📝 No context turns to send');
-      return;
-    }
+    if (!turns || !Array.isArray(turns) || turns.length === 0) return;
 
     try {
-      console.log(`📝 Sending ${turns.length} conversation context turns to Gemini`);
-      
-      // Send conversation history using sendClientContent
       await client.session.geminiSession.sendClientContent({
         turns: turns,
         turnComplete: turnComplete
       });
       
-      console.log(`✅ Conversation context loaded successfully`);
-      
-      // Notify client that context was loaded
       this.sendToClient(clientId, {
         type: 'context_loaded',
         messageCount: turns.length,
         timestamp: new Date().toISOString()
       });
-      
     } catch (error) {
-      console.error('Send context error:', error);
       this.sendError(clientId, `Failed to load context: ${error.message}`);
     }
   }
@@ -827,7 +760,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         }
       });
     } catch (error) {
-      console.error('Audio data error:', error);
+      // Audio data error - silent
     }
   }
 
@@ -867,11 +800,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         sessionId,
         timestamp: new Date().toISOString()
       });
-
-      console.log(`✅ Session ended: ${sessionId}`);
-
     } catch (error) {
-      console.error('End session error:', error);
       this.sendError(clientId, `Failed to end session: ${error.message}`);
     }
   }
@@ -883,15 +812,13 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     const client = this.clients.get(clientId);
     if (!client) return;
 
-    console.log(`🔌 Client disconnected: ${clientId}`);
-
     if (client.session) {
       try {
         await this.saveSessionMessages(clientId, client.session.id);
         client.session.geminiSession.close();
         this.sessionManager.removeSession(client.session.id);
       } catch (error) {
-        console.error(`Error closing session for ${clientId}:`, error);
+        // Cleanup error
       }
     }
 
@@ -902,7 +829,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
    * Handle WebSocket error
    */
   handleError(clientId, error) {
-    console.error(`WebSocket error for ${clientId}:`, error);
     this.sendError(clientId, 'WebSocket error');
   }
 
@@ -916,7 +842,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     try {
       client.ws.send(JSON.stringify(message));
     } catch (error) {
-      console.error(`Failed to send to ${clientId}:`, error);
+      // Send error
     }
   }
 
@@ -947,10 +873,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       // Check for timeout
       const timeout = parseInt(process.env.SESSION_TIMEOUT) || 900000; // 15 min
       if (Date.now() - client.lastActivity.getTime() > timeout) {
-        console.log(`Session timeout for ${clientId}`);
-        if (client.session) {
-          this.handleEndSession(clientId, {});
-        }
+        if (client.session) this.handleEndSession(clientId, {});
         return;
       }
 
@@ -981,8 +904,6 @@ export async function setupLiveApiServer(wss) {
   });
 
   wss.getStats = () => liveApiService.getStats();
-
-  console.log('✅ Live API WebSocket server ready');
   return liveApiService;
 }
 
