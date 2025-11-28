@@ -69,14 +69,8 @@ export class LiveApiService {
 
     // Setup event handlers
     ws.on('message', (data) => this.handleMessage(clientId, data));
-    ws.on('close', (code, reason) => {
-      console.log(`🔌 WebSocket closed: ${clientId}, code: ${code}, reason: ${reason?.toString() || 'none'}`);
-      this.handleDisconnection(clientId, `code=${code}`);
-    });
-    ws.on('error', (error) => {
-      console.log(`❌ WebSocket error for ${clientId}: ${error.message}`);
-      this.handleError(clientId, error);
-    });
+    ws.on('close', () => this.handleDisconnection(clientId));
+    ws.on('error', (error) => this.handleError(clientId, error));
 
     // Send welcome
     this.sendToClient(clientId, {
@@ -617,7 +611,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
   async handleSendVideo(clientId, message) {
     const client = this.clients.get(clientId);
     if (!client?.session) {
-      console.log(`⚠️ Video frame received but no session for ${clientId}`);
       return this.sendError(clientId, 'No active session');
     }
 
@@ -627,14 +620,13 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     try {
-      // Update activity to prevent timeout
-      this.sessionManager.updateActivity(client.session.id);
-      
+      console.log(`[LiveAPI] Sending video frame: ${data.length} chars, mimeType: ${mimeType}`);
       await client.session.geminiSession.sendRealtimeInput({
         video: { data, mimeType }
       });
+      console.log(`[LiveAPI] Video frame sent successfully`);
     } catch (error) {
-      console.log(`❌ Video send error: ${error.message}`);
+      console.error(`[LiveAPI] Video send error:`, error.message);
     }
   }
 
@@ -734,27 +726,21 @@ Remember: You're having a real-time voice conversation, so keep responses natura
   /**
    * Handle client disconnection
    */
-  async handleDisconnection(clientId, reason = 'unknown') {
-    console.log(`🔴 Client disconnecting: ${clientId}, reason: ${reason}`);
+  async handleDisconnection(clientId) {
     const client = this.clients.get(clientId);
-    if (!client) {
-      console.log(`⚠️ Client ${clientId} not found during disconnect`);
-      return;
-    }
+    if (!client) return;
 
     if (client.session) {
-      console.log(`🔴 Closing session ${client.session.id} due to client disconnect`);
       try {
         await this.saveSessionMessages(clientId, client.session.id);
         client.session.geminiSession.close();
         this.sessionManager.removeSession(client.session.id);
       } catch (error) {
-        console.log(`❌ Error during disconnect cleanup: ${error.message}`);
+        // Cleanup error
       }
     }
 
     this.clients.delete(clientId);
-    console.log(`🔌 Client ${clientId} fully disconnected`);
   }
 
   /**
