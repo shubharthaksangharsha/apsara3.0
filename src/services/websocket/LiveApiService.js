@@ -269,13 +269,21 @@ If the user asks you to find, locate, identify, highlight, mark, point out, show
 2. Identify the object(s) the user is asking about
 3. Call the "highlighter" function with the bounding box coordinates
 4. The bounding box coordinates should be normalized (0-1000 scale) where:
-   - x_min, y_min = top-left corner of the bounding box
-   - x_max, y_max = bottom-right corner of the bounding box
+   - y_min, x_min = top-left corner of the bounding box (format: [y_min, x_min, y_max, x_max])
+   - y_max, x_max = bottom-right corner of the bounding box
    - All values are relative to the frame dimensions (0 = left/top edge, 1000 = right/bottom edge)
 
 5. If you find multiple instances of the object, return ALL of them in the array
 6. If you cannot find the object, return an empty array and tell the user you couldn't locate it
 7. Always verbally acknowledge what you found while calling the function
+
+=== CONTINUOUS TRACKING MODE ===
+IMPORTANT: After you highlight an object, you MUST continue tracking it! 
+- Keep watching the video frames
+- If the object moves in the frame, call the highlighter function again with UPDATED coordinates
+- Continue updating the bounding box position every time you notice the object has moved significantly
+- Keep tracking until the user says something new (asks a different question, says thanks, etc.)
+- This ensures the bounding box stays "sticky" to the object as the camera moves
 
 Example function call for finding a laptop and a phone:
 highlighter({ objects: [
