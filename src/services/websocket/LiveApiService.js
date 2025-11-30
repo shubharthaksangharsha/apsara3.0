@@ -220,7 +220,7 @@ export class LiveApiService {
         outputAudioTranscription: {},
         inputAudioTranscription: {},
         // Use LOW media resolution for faster video/image processing
-        mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW
+        mediaResolution: MediaResolution.MEDIA_RESOLUTION_MEDIUM,
       };
 
       // Build conversation context summary for system instruction
@@ -260,14 +260,77 @@ Guidelines:
 - Be helpful and positive
 - For complex topics, break down information into digestible parts
 
+=== OBJECT DETECTION & HIGHLIGHTING CAPABILITY ===
+You have the ability to detect and highlight objects in the user's camera or screen share feed.
+
+If the user asks you to find, locate, identify, highlight, mark, point out, show, or detect any object (for example: "Where is the fan?", "Highlight the laptop", "Show me my shoes", "Mark the charger", "Point to the door", "Find my keys", "Where are my glasses?"), then you MUST:
+
+1. Look at the current video/camera frame carefully
+2. Identify the object(s) the user is asking about
+3. Call the "highlighter" function with the bounding box coordinates
+4. The bounding box coordinates should be normalized (0-1000 scale) where:
+   - x_min, y_min = top-left corner of the bounding box
+   - x_max, y_max = bottom-right corner of the bounding box
+   - All values are relative to the frame dimensions (0 = left/top edge, 1000 = right/bottom edge)
+
+5. If you find multiple instances of the object, return ALL of them in the array
+6. If you cannot find the object, return an empty array and tell the user you couldn't locate it
+7. Always verbally acknowledge what you found while calling the function
+
+Example function call for finding a laptop and a phone:
+highlighter({ objects: [
+  { "label": "laptop", "box_2d": [120, 200, 450, 500] },
+  { "label": "phone", "box_2d": [600, 300, 700, 450] }
+]})
+
+The Apsara app will overlay these bounding boxes on the user's live camera/video feed to show them exactly where the objects are.
+
 Remember: You're having a real-time voice conversation, so keep responses natural and flowing.${contextSummary}`
         }]
       };
       
       liveConfig.systemInstruction = apsaraSystemInstruction;
       
-      // Add Google Search tool for real-time information
-      liveConfig.tools = [{ googleSearch: {} }];
+      // Define the highlighter function for object detection
+      const highlighterFunction = {
+        name: "highlighter",
+        description: "Highlights and marks objects in the user's camera or screen share feed by drawing bounding boxes around detected objects. Use this when the user asks to find, locate, identify, highlight, mark, point out, show, or detect any object in the video/camera feed.",
+        parameters: {
+          type: "object",
+          properties: {
+            objects: {
+              type: "array",
+              description: "Array of detected objects with their labels and bounding box coordinates",
+              items: {
+                type: "object",
+                properties: {
+                  label: {
+                    type: "string",
+                    description: "Name/label of the detected object (e.g., 'laptop', 'phone', 'cup')"
+                  },
+                  box_2d: {
+                    type: "array",
+                    description: "Bounding box coordinates as [y_min, x_min, y_max, x_max] normalized to 0-1000 scale",
+                    items: {
+                      type: "number"
+                    },
+                    minItems: 4,
+                    maxItems: 4
+                  }
+                },
+                required: ["label", "box_2d"]
+              }
+            }
+          },
+          required: ["objects"]
+        }
+      };
+      
+      // Add Google Search tool and highlighter function for real-time information
+      liveConfig.tools = [
+        { googleSearch: {} },
+        { functionDeclarations: [highlighterFunction] }
+      ];
 
       // Create Gemini Live session
       // Note: We need to send context AFTER the session is stored, not in onopen
@@ -363,6 +426,12 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     const session = client.session;
     const sc = response.serverContent;
 
+    // Priority 0: Tool calls (function calling) - handle immediately
+    if (response.toolCall) {
+      console.log('[LiveAPI] Tool call received:', JSON.stringify(response.toolCall, null, 2));
+      await this.handleToolCall(clientId, sessionId, response.toolCall);
+    }
+
     // Priority 1: Audio data - send immediately for lowest latency
     if (response.data) {
       this.sendToClient(clientId, { type: 'audio_data', sessionId, data: response.data });
@@ -405,6 +474,72 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
     if (response.goAway) {
       this.sendToClient(clientId, { type: 'go_away', sessionId, timeLeft: response.goAway.timeLeft });
+    }
+  }
+
+  /**
+   * Handle tool calls from Gemini (function calling)
+   * Processes function calls and sends responses back to the model
+   */
+  async handleToolCall(clientId, sessionId, toolCall) {
+    const client = this.clients.get(clientId);
+    if (!client?.session) return;
+
+    const session = client.session;
+    const functionResponses = [];
+
+    console.log('[LiveAPI] Processing tool call for session:', sessionId);
+
+    for (const fc of toolCall.functionCalls || []) {
+      console.log(`[LiveAPI] Function called: ${fc.name}`);
+      console.log(`[LiveAPI] Function args:`, JSON.stringify(fc.args, null, 2));
+
+      if (fc.name === 'highlighter') {
+        // Handle highlighter function - send bounding boxes to client
+        const objects = fc.args?.objects || [];
+        
+        console.log(`[LiveAPI] Highlighter called with ${objects.length} objects:`, objects);
+        
+        // Send highlight data to client for overlay rendering
+        this.sendToClient(clientId, {
+          type: 'highlight_objects',
+          sessionId,
+          objects: objects.map(obj => ({
+            label: obj.label,
+            box_2d: obj.box_2d // [y_min, x_min, y_max, x_max] normalized 0-1000
+          })),
+          timestamp: new Date().toISOString()
+        });
+
+        // Send function response back to model
+        functionResponses.push({
+          id: fc.id,
+          name: fc.name,
+          response: { 
+            result: "success",
+            message: `Highlighted ${objects.length} object(s) on the user's screen`,
+            objects_highlighted: objects.map(o => o.label)
+          }
+        });
+      } else {
+        // Unknown function - send generic response
+        console.log(`[LiveAPI] Unknown function: ${fc.name}`);
+        functionResponses.push({
+          id: fc.id,
+          name: fc.name,
+          response: { result: "error", message: "Unknown function" }
+        });
+      }
+    }
+
+    // Send tool responses back to Gemini
+    if (functionResponses.length > 0) {
+      try {
+        console.log('[LiveAPI] Sending tool responses:', JSON.stringify(functionResponses, null, 2));
+        await session.geminiSession.sendToolResponse({ functionResponses });
+      } catch (error) {
+        console.error('[LiveAPI] Error sending tool response:', error.message);
+      }
     }
   }
 
