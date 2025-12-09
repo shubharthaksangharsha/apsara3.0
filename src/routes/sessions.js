@@ -19,6 +19,7 @@ router.post('/ephemeral-token', asyncHandler(async (req, res) => {
       newSessionExpireTime: Joi.string(), // ISO 8601 format
       liveConnectConstraints: Joi.object({
         model: Joi.string().valid(
+          'gemini-2.5-flash-native-audio-preview-09-2025',
           'gemini-live-2.5-flash-preview',
           'gemini-2.0-flash-live-001',
           'gemini-2.5-flash-preview-native-audio-dialog',

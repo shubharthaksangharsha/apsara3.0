@@ -180,7 +180,7 @@ export class GoogleProvider extends BaseProvider {
   async createLiveSession(params) {
     this.validateInitialization();
 
-    const { model = 'gemini-2.0-flash-live-001', config = {}, callbacks = {} } = params;
+    const { model = 'gemini-2.5-flash-native-audio-preview-09-2025', config = {}, callbacks = {} } = params;
 
     try {
       // Sanitize config to only include valid Live API parameters
@@ -489,11 +489,13 @@ export class GoogleProvider extends BaseProvider {
       ],
       // Live API models
       live: [
-        // Native audio models
+        // Native audio models (current)
+        'gemini-2.5-flash-native-audio-preview-09-2025',
         'gemini-2.5-flash-preview-native-audio-dialog',
         'gemini-2.5-flash-exp-native-audio-thinking-dialog',
         // Half-cascade models
         'gemini-live-2.5-flash-preview',
+        // Legacy (deprecated)
         'gemini-2.0-flash-live-001'
       ],
       // Embedding models

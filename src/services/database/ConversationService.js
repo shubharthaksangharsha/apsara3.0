@@ -47,7 +47,7 @@ class ConversationService {
             tools: config.tools || []
           } : undefined,
           live: type === 'live' || type === 'hybrid' ? {
-            model: config.liveModel || 'gemini-2.0-flash-live-001',
+            model: config.liveModel || 'gemini-2.5-flash-native-audio-preview-09-2025',
             responseModalities: config.responseModalities || ['TEXT'],
             speechConfig: config.speechConfig,
             tools: config.liveTools || []
@@ -118,7 +118,7 @@ class ConversationService {
       // Update conversation type and config
       conversation.type = conversation.type === 'rest' ? 'hybrid' : conversation.type;
       conversation.config.live = {
-        model: liveConfig.model || 'gemini-2.0-flash-live-001',
+        model: liveConfig.model || 'gemini-2.5-flash-native-audio-preview-09-2025',
         responseModalities: liveConfig.responseModalities || ['TEXT'],
         speechConfig: liveConfig.speechConfig,
         sessionResumption: {},
