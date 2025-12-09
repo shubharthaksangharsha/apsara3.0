@@ -140,6 +140,10 @@ export class LiveApiService {
    * Creates a Gemini Live session with AUDIO response modality and transcription enabled
    */
   async handleCreateSession(clientId, message) {
+    console.log(`\n📝 ====== CREATE SESSION START ======`);
+    console.log(`📝 ClientId: ${clientId}`);
+    console.log(`📝 Message data:`, JSON.stringify(message.data || {}, null, 2));
+    
     try {
       const {
         model = 'gemini-2.0-flash-live-001',
@@ -150,12 +154,16 @@ export class LiveApiService {
         language = 'en-US'
       } = message.data || {};
 
+      console.log(`📝 Parsed: model=${model}, userId=${userId}, voice=${voice}, language=${language}`);
+
       if (!userId) {
+        console.log(`❌ No userId provided`);
         return this.sendError(clientId, 'userId is required');
       }
 
       const client = this.clients.get(clientId);
       const sessionId = uuidv4();
+      console.log(`📝 Generated sessionId: ${sessionId}`);
 
 
       // Create or get conversation
@@ -277,14 +285,6 @@ If the user asks you to find, locate, identify, highlight, mark, point out, show
 6. If you cannot find the object, return an empty array and tell the user you couldn't locate it
 7. Always verbally acknowledge what you found while calling the function
 
-=== CONTINUOUS TRACKING MODE ===
-IMPORTANT: After you highlight an object, you MUST continue tracking it! 
-- Keep watching the video frames
-- If the object moves in the frame, call the highlighter function again with UPDATED coordinates
-- Continue updating the bounding box position every time you notice the object has moved significantly
-- Keep tracking until the user says something new (asks a different question, says thanks, etc.)
-- This ensures the bounding box stays "sticky" to the object as the camera moves
-
 Example function call for finding a laptop and a phone:
 highlighter({ objects: [
   { "label": "laptop", "box_2d": [120, 200, 450, 500] },
@@ -343,12 +343,17 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       // Create Gemini Live session
       // Note: We need to send context AFTER the session is stored, not in onopen
       // because liveSession isn't assigned yet during the callback
+      console.log(`🔌 Attempting to connect to Gemini Live API for session ${sessionId}...`);
+      console.log(`🔌 Calling ProviderManager.createLiveSession()...`);
+      const liveSessionStartTime = Date.now();
+      
       const liveSession = await ProviderManager.createLiveSession({
         model,
         provider: 'google',
         config: liveConfig,
         callbacks: {
           onopen: async () => {
+            console.log(`🟢 Gemini Live session OPENED for session ${sessionId} (took ${Date.now() - liveSessionStartTime}ms)`);
             this.sendToClient(clientId, {
               type: 'session_ready',
               sessionId,
@@ -362,15 +367,17 @@ Remember: You're having a real-time voice conversation, so keep responses natura
           },
           
           onerror: (error) => {
+            console.error(`🔴 Gemini Live session ERROR for session ${sessionId}:`, error);
             this.sendToClient(clientId, {
               type: 'session_error',
               sessionId,
-              error: error.message,
+              error: error.message || String(error),
               timestamp: new Date().toISOString()
             });
           },
           
           onclose: async (reason) => {
+            console.log(`🟠 Gemini Live session CLOSED for session ${sessionId}:`, reason);
             await this.saveSessionMessages(clientId, sessionId);
             this.sendToClient(clientId, {
               type: 'session_closed',
@@ -381,6 +388,8 @@ Remember: You're having a real-time voice conversation, so keep responses natura
           }
         }
       });
+      console.log(`✅ Gemini Live connect() returned for session ${sessionId} (took ${Date.now() - liveSessionStartTime}ms)`);
+      console.log(`✅ liveSession object:`, liveSession ? 'exists' : 'null/undefined');
 
       // Store session
       client.session = {

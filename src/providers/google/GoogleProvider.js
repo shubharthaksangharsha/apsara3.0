@@ -234,17 +234,33 @@ export class GoogleProvider extends BaseProvider {
       console.log(`🔧 Model being used:`, model);
       console.log(`🔧 Full connect parameters:`, JSON.stringify({ model, config: validConfig }, null, 2));
       
+      console.log(`⏳ Attempting to connect to Gemini Live API...`);
+      const connectStartTime = Date.now();
+      
       const session = await this.client.live.connect({
         model,
         config: validConfig,
         callbacks: {
-          onopen: callbacks.onopen || (() => console.log('🟢 Google Live session opened')),
-          onmessage: callbacks.onmessage || ((message) => console.log('📨 Google Live message:', message)),
-          onerror: callbacks.onerror || ((error) => console.error('🔴 Google Live session error:', error)),
-          onclose: callbacks.onclose || ((reason) => console.log('🔴 Google Live session closed:', reason)),
-          ...callbacks
+          onopen: () => {
+            console.log(`🟢 Google Live session OPENED (took ${Date.now() - connectStartTime}ms)`);
+            if (callbacks.onopen) callbacks.onopen();
+          },
+          onmessage: (message) => {
+            console.log(`📨 Google Live message received:`, message?.type || 'unknown type');
+            if (callbacks.onmessage) callbacks.onmessage(message);
+          },
+          onerror: (error) => {
+            console.error(`🔴 Google Live session ERROR:`, error);
+            if (callbacks.onerror) callbacks.onerror(error);
+          },
+          onclose: (reason) => {
+            console.log(`🔴 Google Live session CLOSED:`, reason);
+            if (callbacks.onclose) callbacks.onclose(reason);
+          }
         }
       });
+      
+      console.log(`✅ Gemini Live connect() returned (took ${Date.now() - connectStartTime}ms)`);
 
       return {
         success: true,
@@ -254,7 +270,8 @@ export class GoogleProvider extends BaseProvider {
         sessionId: session.id || Date.now().toString()
       };
     } catch (error) {
-      console.error('Google Live Session Error:', error);
+      console.error('❌ Google Live Session Error:', error?.message || error);
+      console.error('❌ Full error:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
       throw this.createProviderError(error);
     }
   }

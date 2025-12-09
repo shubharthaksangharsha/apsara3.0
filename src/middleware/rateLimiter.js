@@ -23,7 +23,7 @@ const rateLimiters = {
   // Very strict rate limiting for Live API WebSocket connections
   liveApi: new RateLimiterMemory({
     keyGenerator: (req) => req.ip,
-    points: 10, // 10 connections
+    points: 100, // 100 connections per hour (increased for development)
     duration: 60 * 60, // per hour
   }),
 
