@@ -83,12 +83,12 @@ router.post('/google', googleAuthRateLimiter, asyncHandler(async (req, res) => {
     console.log(`👤 User: ${name}`);
     console.log(`🆔 Google ID: ${googleId}`);
 
-    // Check if user exists by Google ID first
-    let user = await User.findOne({ googleId });
+    // Check if user exists by Google ID first (include password for hasPassword check)
+    let user = await User.findOne({ googleId }).select('+password');
     
     if (!user) {
       // Check if user exists by email (could be email/password user)
-      user = await User.findOne({ email: email.toLowerCase() });
+      user = await User.findOne({ email: email.toLowerCase() }).select('+password');
       
       if (user) {
         // Existing user with this email - link Google account
@@ -142,6 +142,9 @@ router.post('/google', googleAuthRateLimiter, asyncHandler(async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    // Check if user has a real password (bcrypt hash starts with $2)
+    const hasPassword = user.password && user.password.startsWith('$2');
+
     res.json({
       success: true,
       message: user.googleId && !user.authProvider === 'google' 
@@ -155,8 +158,8 @@ router.post('/google', googleAuthRateLimiter, asyncHandler(async (req, res) => {
           profilePicture: user.profilePicture,
           subscriptionPlan: user.subscriptionPlan,
           role: user.role,
-          authProvider: user.authProvider,
-          hasPassword: user.authProvider === 'local' || user.authProvider === 'both',
+          authProvider: user.authProvider || 'google',
+          hasPassword: hasPassword,
           isEmailVerified: user.isEmailVerified
         },
         token,

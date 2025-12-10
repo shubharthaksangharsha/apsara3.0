@@ -144,6 +144,101 @@ const regenerateSchema = Joi.object({
 });
 
 /**
+ * @route GET /api/ai/limits
+ * @desc Get AI chat usage limits for the current user
+ * @access Public (optional auth)
+ */
+router.get('/limits', asyncHandler(async (req, res) => {
+  // Extract userId from token if provided, otherwise treat as guest
+  let userId = null;
+  let subscriptionPlan = 'guest';
+  const authHeader = req.headers.authorization;
+  
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.substring(7);
+      const jwt = await import('jsonwebtoken');
+      const decoded = jwt.default.verify(token, process.env.JWT_SECRET);
+      userId = decoded.userId || decoded.id;
+      
+      // Get user's subscription plan
+      if (userId) {
+        const user = await User.findById(userId);
+        if (user) {
+          subscriptionPlan = user.subscriptionPlan || 'free';
+        }
+      }
+    } catch (error) {
+      // Invalid token, treat as guest
+      userId = null;
+    }
+  }
+  
+  // Get or create user usage
+  let userUsage = null;
+  if (userId) {
+    userUsage = await UserUsage.findOne({ userId });
+    if (!userUsage) {
+      userUsage = await UserUsage.findOrCreateUsage(userId, subscriptionPlan);
+    }
+  }
+  
+  // Get limits based on subscription plan
+  const limits = UserUsage.getRateLimits(subscriptionPlan);
+  
+  // Build response
+  let flashUsed = 0;
+  let flashLimit = limits['gemini-2.5-flash']?.limit || 20;
+  let proUsed = 0;
+  let proLimit = limits['gemini-2.5-pro']?.limit || 5;
+  
+  if (userUsage) {
+    // Check if we need to reset daily usage
+    const today = new Date().toISOString().split('T')[0];
+    const usageDate = new Date(userUsage.dailyUsage?.date || new Date()).toISOString().split('T')[0];
+    
+    if (today === usageDate) {
+      flashUsed = userUsage.dailyUsage['gemini-2.5-flash']?.count || 0;
+      proUsed = userUsage.dailyUsage['gemini-2.5-pro']?.count || 0;
+    }
+    // If different day, usage is 0 (daily reset)
+  }
+  
+  // For guest users, use total message limits
+  if (subscriptionPlan === 'guest' && userUsage) {
+    flashUsed = userUsage.guestLimits?.totalMessagesUsed || 0;
+    flashLimit = userUsage.guestLimits?.totalMessagesLimit || 5;
+    proLimit = 0; // Guests don't have access to Pro
+  }
+  
+  res.json({
+    success: true,
+    data: {
+      subscriptionPlan,
+      flash: {
+        used: flashUsed,
+        limit: flashLimit,
+        remaining: Math.max(0, flashLimit - flashUsed),
+        message: flashLimit > flashUsed 
+          ? `${flashLimit - flashUsed} Flash messages remaining today`
+          : 'Daily Flash limit reached'
+      },
+      pro: {
+        used: proUsed,
+        limit: proLimit,
+        remaining: Math.max(0, proLimit - proUsed),
+        message: proLimit === 0 
+          ? 'Pro model not available for your plan'
+          : proLimit > proUsed 
+            ? `${proLimit - proUsed} Pro messages remaining today`
+            : 'Daily Pro limit reached'
+      },
+      isGuest: subscriptionPlan === 'guest'
+    }
+  });
+}));
+
+/**
  * @swagger
  * /api/ai/generate:
  *   post:

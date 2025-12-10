@@ -217,11 +217,14 @@ router.post('/login', authRateLimiter, async (req, res) => {
     // Generate auth token
     const token = user.generateAuthToken();
 
-  res.json({
-    success: true,
+    // Check if user has a real password (bcrypt hash starts with $2)
+    const hasPassword = user.password && user.password.startsWith('$2');
+
+    res.json({
+      success: true,
       message: 'Login successful',
       data: {
-    user: {
+        user: {
           id: user._id,
           fullName: user.fullName,
           email: user.email,
@@ -229,7 +232,10 @@ router.post('/login', authRateLimiter, async (req, res) => {
           role: user.role,
           subscriptionPlan: user.subscriptionPlan,
           preferences: user.preferences,
-          usage: user.usage
+          usage: user.usage,
+          profilePicture: user.profilePicture || null,
+          authProvider: user.authProvider || 'local',
+          hasPassword: hasPassword
         },
         token
       }
@@ -433,6 +439,9 @@ router.post('/google-auth', async (req, res) => {
     // Get usage information
     const userUsage = await UserUsage.findOne({ userId: user._id });
     
+    // Check if user has a real password (bcrypt hash starts with $2)
+    const hasPassword = user.password && user.password.startsWith('$2');
+    
     res.json({
       success: true,
       message: user.isNew ? 'Account created and logged in successfully' : 'Logged in successfully',
@@ -445,7 +454,9 @@ router.post('/google-auth', async (req, res) => {
           role: user.role,
           subscriptionPlan: user.subscriptionPlan,
           profilePicture: user.profilePicture,
-          authProvider: user.authProvider
+          authProvider: user.authProvider || 'google',
+          hasPassword: hasPassword,
+          isEmailVerified: user.isEmailVerified
         },
         usageInfo: userUsage ? {
           dailyUsage: userUsage.dailyUsage,
