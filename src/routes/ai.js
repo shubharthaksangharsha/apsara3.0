@@ -2,6 +2,7 @@ import express from 'express';
 import Joi from 'joi';
 import { v4 as uuidv4 } from 'uuid';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { aiRateLimiter } from '../middleware/rateLimiter.js';
 import ProviderManager from '../providers/ProviderManager.js';
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
@@ -213,7 +214,7 @@ const regenerateSchema = Joi.object({
  *       500:
  *         description: Server error
  */
-router.post('/generate', asyncHandler(async (req, res) => {
+router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
   // Validate request
   const { error, value } = generateSchema.validate(req.body);
   if (error) {
@@ -811,7 +812,7 @@ router.post('/validate', asyncHandler(async (req, res) => {
  *       404:
  *         description: Message or conversation not found
  */
-router.post('/edit-message', asyncHandler(async (req, res) => {
+router.post('/edit-message', aiRateLimiter, asyncHandler(async (req, res) => {
   const editMessageSchema = Joi.object({
     userId: Joi.string().required(),
     conversationId: Joi.string().required(),
@@ -1129,9 +1130,9 @@ router.post('/edit-message', asyncHandler(async (req, res) => {
 /**
  * @route POST /api/ai/regenerate
  * @desc Regenerate AI response for a specific message or the last AI message
- * @access Public
+ * @access Public (with rate limiting)
  */
-router.post('/regenerate', asyncHandler(async (req, res) => {
+router.post('/regenerate', aiRateLimiter, asyncHandler(async (req, res) => {
   // Validate request
   const { error, value } = regenerateSchema.validate(req.body);
   if (error) {

@@ -7,7 +7,7 @@ import emailService from '../services/emailService.js';
 import Joi from 'joi';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
-import { clearUserRateLimit } from '../middleware/rateLimiter.js';
+import { clearUserRateLimit, authRateLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -74,8 +74,8 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
-// Register a new user
-router.post('/register', async (req, res) => {
+// Register a new user (with rate limiting)
+router.post('/register', authRateLimiter, async (req, res) => {
   try {
     // Validate request body
     const { error, value } = registerSchema.validate(req.body);
@@ -160,8 +160,8 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Login user
-router.post('/login', async (req, res) => {
+// Login user (with rate limiting)
+router.post('/login', authRateLimiter, async (req, res) => {
   try {
     // Validate request body
     const { error, value } = loginSchema.validate(req.body);
@@ -235,8 +235,8 @@ router.post('/login', async (req, res) => {
     }
   });
 
-// Guest login - creates a temporary user with limited access
-router.post('/guest-login', async (req, res) => {
+// Guest login - creates a temporary user with limited access (with rate limiting)
+router.post('/guest-login', authRateLimiter, async (req, res) => {
   try {
     const { error, value } = guestLoginSchema.validate(req.body);
     if (error) {
@@ -713,8 +713,8 @@ router.post('/resend-verification', async (req, res) => {
   }
 });
 
-// Forgot password
-router.post('/forgot-password', async (req, res) => {
+// Forgot password (with rate limiting)
+router.post('/forgot-password', authRateLimiter, async (req, res) => {
   try {
     const { email } = req.body;
     
@@ -772,8 +772,8 @@ router.post('/forgot-password', async (req, res) => {
   }
 });
 
-// Verify password reset OTP (separate endpoint for two-step verification)
-router.post('/verify-reset-otp', async (req, res) => {
+// Verify password reset OTP (with rate limiting)
+router.post('/verify-reset-otp', authRateLimiter, async (req, res) => {
   try {
     const { email, otp } = req.body;
     
@@ -816,8 +816,8 @@ router.post('/verify-reset-otp', async (req, res) => {
   }
 });
 
-// Verify password reset OTP and set new password
-router.post('/reset-password-otp', async (req, res) => {
+// Verify password reset OTP and set new password (with rate limiting)
+router.post('/reset-password-otp', authRateLimiter, async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
     
@@ -884,8 +884,8 @@ router.post('/reset-password-otp', async (req, res) => {
   }
 });
 
-// Reset password
-router.post('/reset-password', async (req, res) => {
+// Reset password (with rate limiting)
+router.post('/reset-password', authRateLimiter, async (req, res) => {
   try {
     // Validate request body
     const { error, value } = resetPasswordSchema.validate(req.body);

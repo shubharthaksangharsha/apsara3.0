@@ -1,6 +1,7 @@
 import express from 'express';
 import Joi from 'joi';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { sessionRateLimiter, getLiveApiLimitInfo } from '../middleware/rateLimiter.js';
 import ProviderManager from '../providers/ProviderManager.js';
 
 const router = express.Router();
@@ -10,7 +11,7 @@ const router = express.Router();
  * @desc Create ephemeral tokens for Live API client-to-server connections
  * @access Public (with rate limiting)
  */
-router.post('/ephemeral-token', asyncHandler(async (req, res) => {
+router.post('/ephemeral-token', sessionRateLimiter, asyncHandler(async (req, res) => {
   const schema = Joi.object({
     provider: Joi.string().valid('google').default('google'),
     config: Joi.object({
@@ -58,6 +59,36 @@ router.post('/ephemeral-token', asyncHandler(async (req, res) => {
   });
 
   res.status(201).json(result);
+}));
+
+/**
+ * @route GET /api/sessions/live-limits
+ * @desc Check Live API rate limits for the current user
+ * @access Public (optional auth)
+ */
+router.get('/live-limits', asyncHandler(async (req, res) => {
+  // Extract userId from token if provided, otherwise treat as guest
+  let userId = null;
+  const authHeader = req.headers.authorization;
+  
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.substring(7);
+      const jwt = await import('jsonwebtoken');
+      const decoded = jwt.default.verify(token, process.env.JWT_SECRET);
+      userId = decoded.userId || decoded.id;
+    } catch (error) {
+      // Invalid token, treat as guest
+      userId = null;
+    }
+  }
+  
+  const limitInfo = await getLiveApiLimitInfo(userId);
+  
+  res.json({
+    success: true,
+    data: limitInfo
+  });
 }));
 
 /**

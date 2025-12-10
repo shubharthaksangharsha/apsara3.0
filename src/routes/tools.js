@@ -2,6 +2,7 @@ import express from 'express';
 import Joi from 'joi';
 import { v4 as uuidv4 } from 'uuid';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { toolsRateLimiter } from '../middleware/rateLimiter.js';
 import ProviderManager from '../providers/ProviderManager.js';
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
@@ -314,7 +315,7 @@ router.get('/:provider', asyncHandler(async (req, res) => {
  *       404:
  *         description: Plugin not found
  */
-router.post('/:provider/:plugin/send', asyncHandler(async (req, res) => {
+router.post('/:provider/:plugin/send', toolsRateLimiter, asyncHandler(async (req, res) => {
   const { provider, plugin } = req.params;
   
   // Validate input

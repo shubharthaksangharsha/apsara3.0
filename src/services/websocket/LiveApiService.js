@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { liveApiRateLimiter } from '../../middleware/rateLimiter.js';
+import { liveApiRateLimiter, liveApiUserRateLimiter, getLiveApiLimitInfo } from '../../middleware/rateLimiter.js';
 import ProviderManager from '../../providers/ProviderManager.js';
 import { LiveSessionManager } from './LiveSessionManager.js';
 import { Conversation, Message } from '../../models/index.js';
@@ -162,8 +162,23 @@ export class LiveApiService {
       }
 
       const client = this.clients.get(clientId);
+      
+      // User-based rate limiting for Live API sessions
+      const rateLimitResult = await liveApiUserRateLimiter(userId, client?.ip);
+      if (!rateLimitResult.success) {
+        console.log(`❌ Live API rate limit exceeded for user: ${userId}`);
+        this.sendToClient(clientId, {
+          type: 'rate_limit_exceeded',
+          error: rateLimitResult.message,
+          retryAfter: rateLimitResult.retryAfter,
+          limit: rateLimitResult.limit,
+          limitType: rateLimitResult.limitType || 'daily'
+        });
+        return;
+      }
+      
       const sessionId = uuidv4();
-      console.log(`📝 Generated sessionId: ${sessionId}`);
+      console.log(`📝 Generated sessionId: ${sessionId}, remaining sessions: ${rateLimitResult.remainingPoints}/${rateLimitResult.limit}`);
 
 
       // Create or get conversation

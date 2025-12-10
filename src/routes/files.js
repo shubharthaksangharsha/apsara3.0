@@ -4,9 +4,9 @@ import Joi from 'joi';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { fileUploadRateLimiter, getFileUploadLimitInfo } from '../middleware/rateLimiter.js';
 import ProviderManager from '../providers/ProviderManager.js';
 import File from '../models/File.js';
-import { getFileUploadLimitInfo } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -231,9 +231,9 @@ router.get('/upload-limits', asyncHandler(async (req, res) => {
 /**
  * @route POST /api/files/upload
  * @desc Upload files using specified storage method
- * @access Public (with rate limiting)
+ * @access Public (with subscription-based rate limiting)
  */
-router.post('/upload', (req, res, next) => {
+router.post('/upload', fileUploadRateLimiter, (req, res, next) => {
   upload.array('files', 10)(req, res, (err) => {
     if (err) {
       // Handle multer errors
@@ -436,9 +436,9 @@ router.post('/upload', (req, res, next) => {
 /**
  * @route POST /api/files/smart-upload
  * @desc Smart file upload with automatic provider selection
- * @access Public (with rate limiting)
+ * @access Public (with subscription-based rate limiting)
  */
-router.post('/smart-upload', (req, res, next) => {
+router.post('/smart-upload', fileUploadRateLimiter, (req, res, next) => {
   upload.array('files', 10)(req, res, (err) => {
     if (err) {
       // Handle multer errors (same as original upload)

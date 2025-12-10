@@ -2,6 +2,7 @@ import express from 'express';
 import Joi from 'joi';
 import { v4 as uuidv4 } from 'uuid';
 import { asyncHandler } from '../middleware/errorHandler.js';
+import { conversationWriteRateLimiter, messageRateLimiter } from '../middleware/rateLimiter.js';
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
 
@@ -47,9 +48,9 @@ const saveMessageSchema = Joi.object({
 /**
  * @route POST /api/conversations
  * @desc Create a new conversation
- * @access Public
+ * @access Public (with rate limiting)
  */
-router.post('/', asyncHandler(async (req, res) => {
+router.post('/', conversationWriteRateLimiter, asyncHandler(async (req, res) => {
   const { error, value } = createConversationSchema.validate(req.body);
   if (error) {
     return res.status(400).json({
@@ -154,9 +155,9 @@ router.get('/:conversationId/messages', asyncHandler(async (req, res) => {
 /**
  * @route POST /api/conversations/messages
  * @desc Save a message to a conversation
- * @access Public
+ * @access Public (with rate limiting)
  */
-router.post('/messages', asyncHandler(async (req, res) => {
+router.post('/messages', messageRateLimiter, asyncHandler(async (req, res) => {
   const { error, value } = saveMessageSchema.validate(req.body);
   if (error) {
     return res.status(400).json({
@@ -232,9 +233,9 @@ router.post('/messages', asyncHandler(async (req, res) => {
 /**
  * @route PUT /api/conversations/:conversationId
  * @desc Update conversation details
- * @access Public
+ * @access Public (with rate limiting)
  */
-router.put('/:conversationId', asyncHandler(async (req, res) => {
+router.put('/:conversationId', conversationWriteRateLimiter, asyncHandler(async (req, res) => {
   const { conversationId } = req.params;
   const { error, value } = updateConversationSchema.validate(req.body);
   
@@ -270,9 +271,9 @@ router.put('/:conversationId', asyncHandler(async (req, res) => {
 /**
  * @route PUT /api/conversations/:conversationId/rename
  * @desc Rename a conversation
- * @access Public
+ * @access Public (with rate limiting)
  */
-router.put('/:conversationId/rename', asyncHandler(async (req, res) => {
+router.put('/:conversationId/rename', conversationWriteRateLimiter, asyncHandler(async (req, res) => {
   const { conversationId } = req.params;
   const { error, value } = renameConversationSchema.validate(req.body);
   
@@ -315,9 +316,9 @@ router.put('/:conversationId/rename', asyncHandler(async (req, res) => {
 /**
  * @route PUT /api/conversations/:conversationId/pin
  * @desc Pin/unpin a conversation
- * @access Public
+ * @access Public (with rate limiting)
  */
-router.put('/:conversationId/pin', asyncHandler(async (req, res) => {
+router.put('/:conversationId/pin', conversationWriteRateLimiter, asyncHandler(async (req, res) => {
   const { conversationId } = req.params;
   const { pin = true } = req.body; // Default to pin=true, can pass pin=false to unpin
 
@@ -357,9 +358,9 @@ router.put('/:conversationId/pin', asyncHandler(async (req, res) => {
 /**
  * @route DELETE /api/conversations/user/:userId/all
  * @desc Delete all conversations and messages for a user
- * @access Public
+ * @access Public (with rate limiting)
  */
-router.delete('/user/:userId/all', asyncHandler(async (req, res) => {
+router.delete('/user/:userId/all', conversationWriteRateLimiter, asyncHandler(async (req, res) => {
   const { userId } = req.params;
 
   console.log(`🗑️ Deleting all conversations for user: ${userId}`);
@@ -392,9 +393,9 @@ router.delete('/user/:userId/all', asyncHandler(async (req, res) => {
 /**
  * @route DELETE /api/conversations/:conversationId
  * @desc Delete a conversation and all its messages
- * @access Public
+ * @access Public (with rate limiting)
  */
-router.delete('/:conversationId', asyncHandler(async (req, res) => {
+router.delete('/:conversationId', conversationWriteRateLimiter, asyncHandler(async (req, res) => {
   const { conversationId } = req.params;
 
   const conversation = await Conversation.findOneAndDelete({ conversationId });
