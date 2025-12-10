@@ -990,7 +990,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
 // Update user profile
 router.put('/profile', authMiddleware, async (req, res) => {
   try {
-    const { fullName, preferences } = req.body;
+    const { fullName, preferences, profilePicture } = req.body;
     const user = req.user;
 
     if (fullName) {
@@ -1001,18 +1001,137 @@ router.put('/profile', authMiddleware, async (req, res) => {
       user.preferences = { ...user.preferences, ...preferences };
     }
 
+    if (profilePicture !== undefined) {
+      user.profilePicture = profilePicture;
+    }
+
     await user.save();
 
     res.json({
       success: true,
       message: 'Profile updated successfully',
       data: {
-        user
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          profilePicture: user.profilePicture,
+          subscriptionPlan: user.subscriptionPlan,
+          authProvider: user.authProvider,
+          hasPassword: user.password && user.password.startsWith('$2')
+        }
       }
     });
 
   } catch (error) {
     console.error('Update profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Set password for Google-only accounts
+router.post('/set-password', authMiddleware, async (req, res) => {
+  try {
+    const { password, confirmPassword } = req.body;
+    const user = await User.findById(req.user._id).select('+password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Validate password
+    if (!password || password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters'
+      });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Passwords do not match'
+      });
+    }
+
+    // Check if user already has a valid password (not a random UUID from Google signup)
+    const hasValidPassword = user.password && user.password.startsWith('$2');
+    if (hasValidPassword && user.authProvider === 'local') {
+      return res.status(400).json({
+        success: false,
+        message: 'You already have a password set. Use "Change Password" instead.'
+      });
+    }
+
+    // Set new password
+    user.password = password; // Will be hashed by pre-save hook
+    user.authProvider = user.authProvider === 'google' ? 'google' : 'local'; // Keep google if it was google
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Password set successfully! You can now log in with email and password.',
+      data: {
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          profilePicture: user.profilePicture,
+          subscriptionPlan: user.subscriptionPlan,
+          authProvider: user.authProvider,
+          hasPassword: true
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Set password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while setting password'
+    });
+  }
+});
+
+// Get current user profile
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('+password');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const hasPassword = user.password && user.password.startsWith('$2');
+
+    res.json({
+      success: true,
+      data: {
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          profilePicture: user.profilePicture,
+          subscriptionPlan: user.subscriptionPlan,
+          authProvider: user.authProvider || 'local',
+          hasPassword: hasPassword,
+          isEmailVerified: user.isEmailVerified,
+          createdAt: user.createdAt
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get profile error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
