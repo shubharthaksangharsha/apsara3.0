@@ -184,6 +184,15 @@ router.post('/login', authRateLimiter, async (req, res) => {
       });
     }
 
+    // Check if this is a Google-only account (no password set)
+    if (user.authProvider === 'google' && !user.password.startsWith('$2')) {
+      return res.status(401).json({
+        success: false,
+        message: 'This account uses Google Sign-In. Please use the "Continue with Google" button to log in.',
+        code: 'GOOGLE_ACCOUNT_ONLY'
+      });
+    }
+
     // Check if account is locked
     if (user.isLocked) {
       return res.status(423).json({
