@@ -56,7 +56,10 @@ const authMiddleware = async (req, res, next) => {
     const token = authHeader.substring(7);
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default-secret-key');
     
-    const user = await User.findById(decoded.id);
+    // Support both 'id' and 'userId' in the token (different endpoints use different field names)
+    const tokenUserId = decoded.id || decoded.userId;
+    
+    const user = await User.findById(tokenUserId);
     if (!user) {
       return res.status(401).json({ 
         success: false, 
@@ -1013,6 +1016,19 @@ router.put('/profile', authMiddleware, async (req, res) => {
     }
 
     if (profilePicture !== undefined) {
+      // Handle both URL and base64 data URI formats
+      if (profilePicture && profilePicture.startsWith('data:')) {
+        // Base64 data URI - validate size (limit to ~2MB of base64 data)
+        const base64Length = profilePicture.length;
+        const maxBase64Length = 2 * 1024 * 1024 * 1.37; // ~2MB in base64 (33% overhead)
+        
+        if (base64Length > maxBase64Length) {
+          return res.status(400).json({
+            success: false,
+            message: 'Profile picture too large. Please use an image smaller than 2MB.'
+          });
+        }
+      }
       user.profilePicture = profilePicture;
     }
 
@@ -1195,6 +1211,9 @@ router.put('/:userId/subscription', authMiddleware, async (req, res) => {
       await clearUserRateLimit(userId);
     }
 
+    // Check if user has a real password (bcrypt hash starts with $2)
+    const hasPassword = user.password && user.password.startsWith('$2');
+
     console.log(`📈 User subscription upgraded: ${user.email} from ${previousPlan} to ${subscriptionPlan}`);
 
     res.json({
@@ -1208,7 +1227,9 @@ router.put('/:userId/subscription', authMiddleware, async (req, res) => {
           subscriptionPlan: user.subscriptionPlan,
           role: user.role,
           isEmailVerified: user.isEmailVerified,
-          avatarUrl: user.profilePicture || null
+          profilePicture: user.profilePicture || null,
+          authProvider: user.authProvider || 'local',
+          hasPassword: hasPassword
         }
       }
     });

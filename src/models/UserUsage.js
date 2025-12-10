@@ -16,8 +16,8 @@ const userUsageSchema = new mongoose.Schema({
   },
   dailyUsage: {
     date: {
-      type: Date,
-      default: () => new Date().toISOString().split('T')[0] // YYYY-MM-DD format
+      type: String,
+      default: () => new Date().toISOString().split('T')[0] // YYYY-MM-DD format as string
     },
     'gemini-2.5-flash': {
       count: { type: Number, default: 0 },
@@ -58,7 +58,12 @@ userUsageSchema.index({ lastResetDate: 1 });
 // Virtual for checking if daily reset is needed
 userUsageSchema.virtual('needsDailyReset').get(function() {
   const today = new Date().toISOString().split('T')[0];
-  const usageDate = new Date(this.dailyUsage.date).toISOString().split('T')[0];
+  // Handle both string and Date types for dailyUsage.date
+  const usageDate = this.dailyUsage?.date 
+    ? (typeof this.dailyUsage.date === 'string' 
+        ? this.dailyUsage.date 
+        : new Date(this.dailyUsage.date).toISOString().split('T')[0])
+    : '';
   return today !== usageDate;
 });
 
@@ -124,24 +129,38 @@ userUsageSchema.methods.canMakeRequest = function(model = 'gemini-2.5-flash') {
 
 // Instance method to record usage
 userUsageSchema.methods.recordUsage = function(model = 'gemini-2.5-flash', tokenCount = 0) {
+  console.log(`📊 Recording usage for model: ${model}, tokens: ${tokenCount}`);
+  console.log(`📊 Current dailyUsage.date: ${this.dailyUsage?.date}, needsDailyReset: ${this.needsDailyReset}`);
+  
   // Reset daily usage if needed
   if (this.needsDailyReset) {
+    console.log('📊 Resetting daily usage...');
     this.resetDailyUsage();
   }
 
   // Record usage based on subscription type
   if (this.subscriptionPlan === 'guest') {
     this.guestLimits.totalMessagesUsed += 1;
+    console.log(`📊 Guest usage updated: ${this.guestLimits.totalMessagesUsed}`);
   } else {
-    if (this.dailyUsage[model]) {
-      this.dailyUsage[model].count += 1;
+    // Ensure the model key exists in dailyUsage
+    if (!this.dailyUsage[model]) {
+      console.log(`📊 Creating dailyUsage entry for model: ${model}`);
+      this.dailyUsage[model] = { count: 0, limit: 20 };
     }
+    this.dailyUsage[model].count += 1;
+    console.log(`📊 Model ${model} usage updated: ${this.dailyUsage[model].count}`);
+    
+    // Mark the dailyUsage as modified so Mongoose saves it
+    this.markModified('dailyUsage');
   }
 
   // Update total usage
   this.totalUsage.totalMessages += 1;
   this.totalUsage.totalTokens += tokenCount;
 
+  console.log(`📊 Total messages: ${this.totalUsage.totalMessages}, Total tokens: ${this.totalUsage.totalTokens}`);
+  
   return this.save();
 };
 
