@@ -128,7 +128,7 @@ userUsageSchema.methods.canMakeRequest = function(model = 'gemini-2.5-flash') {
 };
 
 // Instance method to record usage
-userUsageSchema.methods.recordUsage = function(model = 'gemini-2.5-flash', tokenCount = 0) {
+userUsageSchema.methods.recordUsage = async function(model = 'gemini-2.5-flash', tokenCount = 0) {
   console.log(`📊 Recording usage for model: ${model}, tokens: ${tokenCount}`);
   console.log(`📊 Current dailyUsage.date: ${this.dailyUsage?.date}, needsDailyReset: ${this.needsDailyReset}`);
   
@@ -141,6 +141,7 @@ userUsageSchema.methods.recordUsage = function(model = 'gemini-2.5-flash', token
   // Record usage based on subscription type
   if (this.subscriptionPlan === 'guest') {
     this.guestLimits.totalMessagesUsed += 1;
+    this.markModified('guestLimits');
     console.log(`📊 Guest usage updated: ${this.guestLimits.totalMessagesUsed}`);
   } else {
     // Ensure the model key exists in dailyUsage
@@ -153,15 +154,21 @@ userUsageSchema.methods.recordUsage = function(model = 'gemini-2.5-flash', token
     
     // Mark the dailyUsage as modified so Mongoose saves it
     this.markModified('dailyUsage');
+    this.markModified(`dailyUsage.${model}`);
+    this.markModified(`dailyUsage.${model}.count`);
   }
 
   // Update total usage
   this.totalUsage.totalMessages += 1;
   this.totalUsage.totalTokens += tokenCount;
+  this.markModified('totalUsage');
 
   console.log(`📊 Total messages: ${this.totalUsage.totalMessages}, Total tokens: ${this.totalUsage.totalTokens}`);
   
-  return this.save();
+  // Save and verify
+  const savedDoc = await this.save();
+  console.log(`📊 Saved! Verifying - Model ${model} count in DB: ${savedDoc.dailyUsage[model]?.count}`);
+  return savedDoc;
 };
 
 // Instance method to reset daily usage

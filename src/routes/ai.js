@@ -154,12 +154,16 @@ router.get('/limits', asyncHandler(async (req, res) => {
   let subscriptionPlan = 'guest';
   const authHeader = req.headers.authorization;
   
+  console.log(`📊 AI Limits - Auth header present: ${!!authHeader}`);
+  
   if (authHeader && authHeader.startsWith('Bearer ')) {
     try {
       const token = authHeader.substring(7);
       const jwt = await import('jsonwebtoken');
       const decoded = jwt.default.verify(token, process.env.JWT_SECRET);
       userId = decoded.userId || decoded.id;
+      
+      console.log(`📊 AI Limits - Extracted userId from token: ${userId}`);
       
       // Get user's subscription plan
       if (userId) {
@@ -170,17 +174,22 @@ router.get('/limits', asyncHandler(async (req, res) => {
       }
     } catch (error) {
       // Invalid token, treat as guest
+      console.log(`📊 AI Limits - Token error: ${error.message}`);
       userId = null;
     }
   }
   
-  // Get or create user usage
+  // Get or create user usage - use lean() for fresh data and bypass Mongoose caching
   let userUsage = null;
   if (userId) {
-    userUsage = await UserUsage.findOne({ userId });
+    // Force a fresh read from database by not using cached documents
+    userUsage = await UserUsage.findOne({ userId }).lean();
     if (!userUsage) {
-      userUsage = await UserUsage.findOrCreateUsage(userId, subscriptionPlan);
+      // Need to create - use the model method
+      const createdUsage = await UserUsage.findOrCreateUsage(userId, subscriptionPlan);
+      userUsage = createdUsage.toObject();
     }
+    console.log(`📊 AI Limits - Fetched userUsage for ${userId}:`, JSON.stringify(userUsage?.dailyUsage, null, 2));
   }
   
   // Get limits based on subscription plan
@@ -340,6 +349,9 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
     config, 
     stream 
   } = value;
+
+  // Log the userId being used for AI generation
+  console.log(`🤖 AI Generate - Using userId from request body: ${userId}`);
 
   try {
     // Verify conversation exists
