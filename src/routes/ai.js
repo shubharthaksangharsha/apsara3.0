@@ -195,7 +195,7 @@ router.get('/limits', asyncHandler(async (req, res) => {
   // Get limits based on subscription plan
   const limits = UserUsage.getRateLimits(subscriptionPlan);
   
-  // Build response
+  // Build response - use safe field names (underscores instead of dots)
   let flashUsed = 0;
   let flashLimit = limits['gemini-2.5-flash']?.limit || 20;
   let proUsed = 0;
@@ -214,8 +214,9 @@ router.get('/limits', asyncHandler(async (req, res) => {
     console.log(`📊 AI Limits - Today: ${today}, Usage Date: ${usageDate}`);
     
     if (today === usageDate) {
-      flashUsed = userUsage.dailyUsage['gemini-2.5-flash']?.count || 0;
-      proUsed = userUsage.dailyUsage['gemini-2.5-pro']?.count || 0;
+      // Use safe field names (underscores instead of dots)
+      flashUsed = userUsage.dailyUsage['gemini-2_5-flash']?.count || 0;
+      proUsed = userUsage.dailyUsage['gemini-2_5-pro']?.count || 0;
       console.log(`📊 AI Limits - Flash Used: ${flashUsed}, Pro Used: ${proUsed}`);
     } else {
       console.log(`📊 AI Limits - Different day, resetting usage display to 0`);

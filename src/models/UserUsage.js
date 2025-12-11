@@ -1,5 +1,9 @@
 import mongoose from 'mongoose';
 
+// Helper to convert model names to safe field names (dots cause issues in MongoDB)
+const modelToFieldName = (model) => model.replace(/\./g, '_');
+const fieldNameToModel = (fieldName) => fieldName.replace(/_/g, '.');
+
 const userUsageSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -19,11 +23,12 @@ const userUsageSchema = new mongoose.Schema({
       type: String,
       default: () => new Date().toISOString().split('T')[0] // YYYY-MM-DD format as string
     },
-    'gemini-2.5-flash': {
+    // Use underscores instead of dots to avoid MongoDB nested path issues
+    'gemini-2_5-flash': {
       count: { type: Number, default: 0 },
       limit: { type: Number, default: 20 } // Free: 20/day
     },
-    'gemini-2.5-pro': {
+    'gemini-2_5-pro': {
       count: { type: Number, default: 0 },
       limit: { type: Number, default: 5 } // Free: 5/day
     }
@@ -96,12 +101,13 @@ userUsageSchema.methods.canMakeRequest = function(model = 'gemini-2.5-flash') {
 
   const limits = this.constructor.getRateLimits(this.subscriptionPlan);
   const modelLimits = limits[model];
+  
+  // Convert model name to safe field name (dots -> underscores)
+  const safeFieldName = modelToFieldName(model);
 
   if (!modelLimits) {
     return { allowed: false, reason: 'Model not available for your plan' };
   }
-
-
 
   if (this.subscriptionPlan === 'guest') {
     // For guests, check total message limit
@@ -113,9 +119,9 @@ userUsageSchema.methods.canMakeRequest = function(model = 'gemini-2.5-flash') {
     }
     return { allowed: true };
   } else {
-    // For other plans, check daily limits
-    const currentUsage = this.dailyUsage[model]?.count || 0;
-    const limit = this.dailyUsage[model]?.limit || modelLimits.limit;
+    // For other plans, check daily limits using safe field name
+    const currentUsage = this.dailyUsage[safeFieldName]?.count || 0;
+    const limit = this.dailyUsage[safeFieldName]?.limit || modelLimits.limit;
 
     if (currentUsage >= limit) {
       return { 
@@ -129,7 +135,10 @@ userUsageSchema.methods.canMakeRequest = function(model = 'gemini-2.5-flash') {
 
 // Instance method to record usage
 userUsageSchema.methods.recordUsage = async function(model = 'gemini-2.5-flash', tokenCount = 0) {
-  console.log(`📊 Recording usage for model: ${model}, tokens: ${tokenCount}`);
+  // Convert model name to safe field name (dots -> underscores)
+  const safeFieldName = modelToFieldName(model);
+  
+  console.log(`📊 Recording usage for model: ${model} (field: ${safeFieldName}), tokens: ${tokenCount}`);
   console.log(`📊 Current dailyUsage.date: ${this.dailyUsage?.date}, needsDailyReset: ${this.needsDailyReset}`);
   
   // Reset daily usage if needed
@@ -144,18 +153,16 @@ userUsageSchema.methods.recordUsage = async function(model = 'gemini-2.5-flash',
     this.markModified('guestLimits');
     console.log(`📊 Guest usage updated: ${this.guestLimits.totalMessagesUsed}`);
   } else {
-    // Ensure the model key exists in dailyUsage
-    if (!this.dailyUsage[model]) {
-      console.log(`📊 Creating dailyUsage entry for model: ${model}`);
-      this.dailyUsage[model] = { count: 0, limit: 20 };
+    // Ensure the model key exists in dailyUsage using safe field name
+    if (!this.dailyUsage[safeFieldName]) {
+      console.log(`📊 Creating dailyUsage entry for model: ${safeFieldName}`);
+      this.dailyUsage[safeFieldName] = { count: 0, limit: 20 };
     }
-    this.dailyUsage[model].count += 1;
-    console.log(`📊 Model ${model} usage updated: ${this.dailyUsage[model].count}`);
+    this.dailyUsage[safeFieldName].count += 1;
+    console.log(`📊 Model ${safeFieldName} usage updated: ${this.dailyUsage[safeFieldName].count}`);
     
     // Mark the dailyUsage as modified so Mongoose saves it
     this.markModified('dailyUsage');
-    this.markModified(`dailyUsage.${model}`);
-    this.markModified(`dailyUsage.${model}.count`);
   }
 
   // Update total usage
@@ -167,7 +174,7 @@ userUsageSchema.methods.recordUsage = async function(model = 'gemini-2.5-flash',
   
   // Save and verify
   const savedDoc = await this.save();
-  console.log(`📊 Saved! Verifying - Model ${model} count in DB: ${savedDoc.dailyUsage[model]?.count}`);
+  console.log(`📊 Saved! Verifying - Model ${safeFieldName} count in DB: ${savedDoc.dailyUsage[safeFieldName]?.count}`);
   return savedDoc;
 };
 
@@ -176,6 +183,10 @@ userUsageSchema.methods.resetDailyUsage = function() {
   const today = new Date().toISOString().split('T')[0];
   const limits = this.constructor.getRateLimits(this.subscriptionPlan);
 
+  // Use safe field names (underscores instead of dots)
+  const flashField = 'gemini-2_5-flash';
+  const proField = 'gemini-2_5-pro';
+
   // Store previous usage in history
   this.resetHistory.push({
     resetDate: new Date(),
@@ -183,8 +194,8 @@ userUsageSchema.methods.resetDailyUsage = function() {
     previousUsage: {
       date: this.dailyUsage.date,
       usage: {
-        'gemini-2.5-flash': this.dailyUsage['gemini-2.5-flash']?.count || 0,
-        'gemini-2.5-pro': this.dailyUsage['gemini-2.5-pro']?.count || 0
+        'gemini-2.5-flash': this.dailyUsage[flashField]?.count || 0,
+        'gemini-2.5-pro': this.dailyUsage[proField]?.count || 0
       }
     }
   });
@@ -193,19 +204,19 @@ userUsageSchema.methods.resetDailyUsage = function() {
   this.dailyUsage.date = today;
   
   // Ensure the model objects exist before setting count
-  if (!this.dailyUsage['gemini-2.5-flash']) {
-    this.dailyUsage['gemini-2.5-flash'] = { count: 0, limit: 20 };
+  if (!this.dailyUsage[flashField]) {
+    this.dailyUsage[flashField] = { count: 0, limit: 20 };
   }
-  if (!this.dailyUsage['gemini-2.5-pro']) {
-    this.dailyUsage['gemini-2.5-pro'] = { count: 0, limit: 5 };
+  if (!this.dailyUsage[proField]) {
+    this.dailyUsage[proField] = { count: 0, limit: 5 };
   }
   
-  this.dailyUsage['gemini-2.5-flash'].count = 0;
-  this.dailyUsage['gemini-2.5-pro'].count = 0;
+  this.dailyUsage[flashField].count = 0;
+  this.dailyUsage[proField].count = 0;
 
   // Update limits based on current subscription
-  this.dailyUsage['gemini-2.5-flash'].limit = limits['gemini-2.5-flash']?.limit || 20;
-  this.dailyUsage['gemini-2.5-pro'].limit = limits['gemini-2.5-pro']?.limit || 5;
+  this.dailyUsage[flashField].limit = limits['gemini-2.5-flash']?.limit || 20;
+  this.dailyUsage[proField].limit = limits['gemini-2.5-pro']?.limit || 5;
 
   this.lastResetDate = new Date();
 
@@ -213,6 +224,9 @@ userUsageSchema.methods.resetDailyUsage = function() {
   if (this.resetHistory.length > 30) {
     this.resetHistory = this.resetHistory.slice(-30);
   }
+  
+  // Mark as modified
+  this.markModified('dailyUsage');
 };
 
 // Static method to find or create usage record
@@ -226,11 +240,11 @@ userUsageSchema.statics.findOrCreateUsage = async function(userId, subscriptionP
       subscriptionPlan,
       dailyUsage: {
         date: new Date().toISOString().split('T')[0],
-        'gemini-2.5-flash': {
+        'gemini-2_5-flash': {
           count: 0,
           limit: limits['gemini-2.5-flash']?.limit || 20
         },
-        'gemini-2.5-pro': {
+        'gemini-2_5-pro': {
           count: 0,
           limit: limits['gemini-2.5-pro']?.limit || 5
         }
