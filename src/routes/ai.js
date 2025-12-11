@@ -195,11 +195,21 @@ router.get('/limits', asyncHandler(async (req, res) => {
   if (userUsage) {
     // Check if we need to reset daily usage
     const today = new Date().toISOString().split('T')[0];
-    const usageDate = new Date(userUsage.dailyUsage?.date || new Date()).toISOString().split('T')[0];
+    // Handle both string and Date types for dailyUsage.date
+    const usageDate = userUsage.dailyUsage?.date 
+      ? (typeof userUsage.dailyUsage.date === 'string' 
+          ? userUsage.dailyUsage.date 
+          : new Date(userUsage.dailyUsage.date).toISOString().split('T')[0])
+      : '';
+    
+    console.log(`📊 AI Limits - Today: ${today}, Usage Date: ${usageDate}`);
     
     if (today === usageDate) {
       flashUsed = userUsage.dailyUsage['gemini-2.5-flash']?.count || 0;
       proUsed = userUsage.dailyUsage['gemini-2.5-pro']?.count || 0;
+      console.log(`📊 AI Limits - Flash Used: ${flashUsed}, Pro Used: ${proUsed}`);
+    } else {
+      console.log(`📊 AI Limits - Different day, resetting usage display to 0`);
     }
     // If different day, usage is 0 (daily reset)
   }
