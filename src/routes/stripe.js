@@ -33,7 +33,7 @@ router.post('/create-checkout-session', async (req, res) => {
           quantity: 1,
         },
       ],
-      mode: 'payment',
+      mode: 'subscription', // changed from 'payment' to 'subscription'
       success_url: STRIPE_SUCCESS_URL,
       cancel_url: STRIPE_CANCEL_URL,
     });
