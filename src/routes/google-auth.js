@@ -177,4 +177,128 @@ router.post('/google', googleAuthRateLimiter, asyncHandler(async (req, res) => {
   }
 }));
 
+// POST / (for /api/auth/google)
+router.post('/', googleAuthRateLimiter, asyncHandler(async (req, res) => {
+  const { error, value } = googleAuthSchema.validate(req.body);
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.details[0].message
+    });
+  }
+
+  const { idToken, email, name, profilePicture } = value;
+
+  try {
+    // Verify the Google ID token
+    let googlePayload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: idToken,
+        audience: GOOGLE_CLIENT_ID,
+      });
+      googlePayload = ticket.getPayload();
+      if (googlePayload.email !== email) {
+        return res.status(401).json({
+          success: false,
+          message: 'Email verification failed'
+        });
+      }
+    } catch (verifyError) {
+      console.error('Google token verification failed:', verifyError.message);
+      if (process.env.NODE_ENV === 'production') {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid Google token'
+        });
+      }
+      googlePayload = {
+        sub: `google_${Date.now()}`,
+        email: email,
+        name: name,
+        picture: profilePicture,
+        email_verified: true
+      };
+    }
+
+    const googleId = googlePayload.sub;
+    console.log(`🔐 Google Sign-In attempt for: ${email}`);
+    console.log(`👤 User: ${name}`);
+    console.log(`🆔 Google ID: ${googleId}`);
+
+    let user = await User.findOne({ googleId }).select('+password');
+    if (!user) {
+      user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+      if (user) {
+        console.log(`🔗 Linking Google account to existing user: ${email}`);
+        user.googleId = googleId;
+        user.profilePicture = profilePicture || user.profilePicture;
+        user.isEmailVerified = true;
+        if (user.authProvider === 'local') {
+          user.authProvider = 'local';
+        }
+        await user.save();
+      } else {
+        console.log(`✨ Creating new user with Google: ${email}`);
+        user = new User({
+          fullName: name || googlePayload.name || email.split('@')[0],
+          email: email.toLowerCase(),
+          password: `google_${googleId}_${Date.now()}`,
+          profilePicture: profilePicture || googlePayload.picture,
+          googleId: googleId,
+          authProvider: 'google',
+          isEmailVerified: true,
+          subscriptionPlan: 'free',
+          role: 'user'
+        });
+        await user.save();
+      }
+    } else {
+      console.log(`👋 Welcome back Google user: ${email}`);
+      user.profilePicture = profilePicture || user.profilePicture;
+      user.usage.lastLogin = new Date();
+      await user.save();
+    }
+
+    const token = jwt.sign(
+      { 
+        userId: user._id, 
+        email: user.email,
+        role: user.role 
+      },
+      process.env.JWT_SECRET || 'your-jwt-secret-key',
+      { expiresIn: '7d' }
+    );
+    const hasPassword = user.password && user.password.startsWith('$2');
+    res.json({
+      success: true,
+      message: user.googleId && !user.authProvider === 'google' 
+        ? 'Google account linked successfully' 
+        : 'Google Sign-In successful',
+      data: {
+        user: {
+          id: user._id,
+          email: user.email,
+          fullName: user.fullName,
+          profilePicture: user.profilePicture,
+          subscriptionPlan: user.subscriptionPlan,
+          role: user.role,
+          authProvider: user.authProvider || 'google',
+          hasPassword: hasPassword,
+          isEmailVerified: user.isEmailVerified
+        },
+        token,
+        expiresIn: '7d'
+      }
+    });
+  } catch (error) {
+    console.error('Google Sign-In Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Google Sign-In failed',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+}));
+
 export default router;
