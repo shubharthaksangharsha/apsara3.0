@@ -20,11 +20,11 @@ import { rateLimiter } from './middleware/rateLimiter.js';
 import aiRoutes from './routes/ai.js';
 import fileRoutes from './routes/files.js';
 import userRoutes from './routes/users.js';
-
 import pluginsRoutes from './routes/tools.js';
 import sessionRoutes from './routes/sessions.js';
 import googleAuthRoutes from './routes/google-auth.js';
 import conversationRoutes from './routes/conversations.js';
+import stripeRoutes from './routes/stripe.js';
 
 // Load environment variables
 dotenv.config();
@@ -100,11 +100,14 @@ class ApsaraServer {
     this.app.use('/api/ai', aiRoutes);
     this.app.use('/api/files', fileRoutes);
     this.app.use('/api/users', userRoutes);
-
-    this.app.use('/api/plugins', pluginsRoutes);
+    this.app.use('/api/tools', pluginsRoutes);
     this.app.use('/api/sessions', sessionRoutes);
-    this.app.use('/api/auth', googleAuthRoutes);
+    this.app.use('/api/google-auth', googleAuthRoutes);
     this.app.use('/api/conversations', conversationRoutes);
+    // Stripe payment route (conditionally enabled)
+    if (process.env.ENABLE_STRIPE_PAYMENT === 'true') {
+      this.app.use('/api/stripe', stripeRoutes);
+    }
 
     // API documentation endpoint
     this.app.get('/api', (req, res) => {
@@ -200,4 +203,4 @@ class ApsaraServer {
 
 // Start the server
 const apsaraServer = new ApsaraServer();
-apsaraServer.start(); 
+apsaraServer.start();
