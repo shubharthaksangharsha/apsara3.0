@@ -103,6 +103,7 @@ class ApsaraServer {
     this.app.use('/api/tools', pluginsRoutes);
     this.app.use('/api/sessions', sessionRoutes);
     this.app.use('/api/google-auth', googleAuthRoutes);
+    this.app.use('/api/auth/google', googleAuthRoutes); // Alias for compatibility
     this.app.use('/api/conversations', conversationRoutes);
     // Stripe payment route (conditionally enabled)
     if (process.env.ENABLE_STRIPE_PAYMENT === 'true') {
