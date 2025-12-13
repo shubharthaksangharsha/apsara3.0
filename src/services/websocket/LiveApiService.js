@@ -246,7 +246,7 @@ export class LiveApiService {
         outputAudioTranscription: {},
         inputAudioTranscription: {},
         // Use LOW media resolution for faster video/image processing
-        mediaResolution: MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+        mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW,
       };
 
       // Build conversation context summary for system instruction
