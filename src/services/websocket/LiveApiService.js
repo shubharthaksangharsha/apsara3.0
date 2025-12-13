@@ -115,6 +115,9 @@ export class LiveApiService {
         case 'send_audio':
           await this.handleSendAudio(clientId, message);
           break;
+        case 'audio_stream_end':
+          await this.handleAudioStreamEnd(clientId, message);
+          break;
         case 'send_video':
           await this.handleSendVideo(clientId, message);
           break;
@@ -409,7 +412,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       // Store session
       client.session = {
         id: sessionId,
-        sessionId, // Also store as sessionId for compatibility
         geminiSession: liveSession.session,
         model,
         conversationId: finalConversationId,
@@ -419,9 +421,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         currentInputTranscription: '',
         currentOutputTranscription: '',
         // Message buffer for saving complete turns
-        pendingMessages: [],
-        // Track if we're expecting an interruption (text was sent during audio generation)
-        isInterrupting: false
+        pendingMessages: []
       };
 
       this.sessionManager.addSession(sessionId, {
@@ -468,33 +468,14 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     // Priority 1: Audio data - send immediately for lowest latency
-    // BUT: Filter out audio if we're expecting an interruption (text was just sent)
-    // Once we get outputTranscription OR any modelTurn content, it means new response started - allow audio through
-    const hasNewResponse = session.currentOutputTranscription.length > 0 || 
-                          sc?.modelTurn?.parts?.length > 0 ||
-                          response.text;
-    const shouldAllowAudio = !session.isInterrupting || hasNewResponse;
-    
-    if (shouldAllowAudio) {
-      // If we're getting audio and there's a new response, clear interruption flag immediately
-      if (session.isInterrupting && hasNewResponse) {
-        if (session.interruptionTimeoutId) {
-          clearTimeout(session.interruptionTimeoutId);
-          session.interruptionTimeoutId = null;
-        }
-        session.isInterrupting = false;
-      }
-      
-      if (response.data) {
-        this.sendToClient(clientId, { type: 'audio_data', sessionId, data: response.data });
-      } else if (sc?.modelTurn?.parts?.[0]?.inlineData?.data) {
-        const part = sc.modelTurn.parts[0];
-        if (part.inlineData.mimeType?.startsWith('audio/')) {
-          this.sendToClient(clientId, { type: 'audio_data', sessionId, data: part.inlineData.data });
-        }
+    if (response.data) {
+      this.sendToClient(clientId, { type: 'audio_data', sessionId, data: response.data });
+    } else if (sc?.modelTurn?.parts?.[0]?.inlineData?.data) {
+      const part = sc.modelTurn.parts[0];
+      if (part.inlineData.mimeType?.startsWith('audio/')) {
+        this.sendToClient(clientId, { type: 'audio_data', sessionId, data: part.inlineData.data });
       }
     }
-    // If isInterrupting is true and no new response detected yet, we silently drop audio chunks
 
     // Priority 2: Transcriptions
     if (sc?.inputTranscription?.text) {
@@ -503,15 +484,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     if (sc?.outputTranscription?.text) {
-      // If we get output transcription, it means a new response is starting
-      // Clear interruption flag to allow new audio through
-      if (session.isInterrupting) {
-        if (session.interruptionTimeoutId) {
-          clearTimeout(session.interruptionTimeoutId);
-          session.interruptionTimeoutId = null;
-        }
-        session.isInterrupting = false;
-      }
       session.currentOutputTranscription += sc.outputTranscription.text;
       this.sendToClient(clientId, { type: 'output_transcription', sessionId, text: session.currentOutputTranscription });
     }
@@ -519,11 +491,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     // Priority 3: Turn/Generation events - save async (don't block)
     if (sc?.turnComplete) {
       this.saveTurnMessages(clientId, sessionId); // No await - fire and forget
-      if (session.interruptionTimeoutId) {
-        clearTimeout(session.interruptionTimeoutId);
-        session.interruptionTimeoutId = null;
-      }
-      session.isInterrupting = false; // Clear interruption flag on turn complete
       this.sendToClient(clientId, { type: 'turn_complete', sessionId });
     }
 
@@ -531,28 +498,13 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       if (session.currentOutputTranscription || session.currentInputTranscription) {
         this.saveTurnMessages(clientId, sessionId);
       }
-      if (session.interruptionTimeoutId) {
-        clearTimeout(session.interruptionTimeoutId);
-        session.interruptionTimeoutId = null;
-      }
-      session.isInterrupting = false; // Clear interruption flag on generation complete
       this.sendToClient(clientId, { type: 'generation_complete', sessionId });
     }
 
     if (sc?.interrupted) {
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
-      if (session.interruptionTimeoutId) {
-        clearTimeout(session.interruptionTimeoutId);
-        session.interruptionTimeoutId = null;
-      }
-      session.isInterrupting = false; // Clear interruption flag
       this.sendToClient(clientId, { type: 'interrupted', sessionId });
-    }
-    
-    // Also handle sessionResumptionUpdate and goAway if needed
-    if (response.sessionResumptionUpdate) {
-      // Handle session resumption if needed
     }
 
     if (response.goAway) {
@@ -740,41 +692,15 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     try {
-      // Mark that we're expecting an interruption - this will filter out late audio chunks
-      // Reset output transcription so we can detect when new response starts
-      client.session.isInterrupting = true;
-      client.session.currentOutputTranscription = ''; // Reset to detect new response
-      
-      // Set a timeout to clear the flag after 500ms as a safety measure
-      // This ensures audio can flow even if outputTranscription doesn't arrive
-      // Reduced from 2000ms to 500ms for faster response
-      const timeoutId = setTimeout(() => {
-        if (client.session && client.session.isInterrupting) {
-          console.log(`[LiveAPI] Clearing interruption flag after timeout for session ${client.session.id}`);
-          client.session.isInterrupting = false;
-        }
-      }, 500);
-      
-      // Store timeout ID to clear it if interrupted message arrives
-      client.session.interruptionTimeoutId = timeoutId;
-      
-      // Immediately notify client that interruption is happening (for faster UI response)
-      this.sendToClient(clientId, { type: 'interrupted', sessionId: client.session.id });
-      
       // Save the user text message to conversation immediately
       await this.saveUserTextMessage(clientId, text);
 
-      // Send text to Gemini via sendClientContent (this will trigger interruption)
+      // Send text to Gemini via sendClientContent
       await client.session.geminiSession.sendClientContent({
         turns: [{ role: 'user', parts: [{ text }] }],
         turnComplete: true
       });
     } catch (error) {
-      if (client.session?.interruptionTimeoutId) {
-        clearTimeout(client.session.interruptionTimeoutId);
-        client.session.interruptionTimeoutId = null;
-      }
-      client.session.isInterrupting = false; // Reset on error
       this.sendError(clientId, `Failed to send text: ${error.message}`);
     }
   }
@@ -846,6 +772,25 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       });
     } catch (error) {
       // Audio send error - don't spam client
+    }
+  }
+
+  /**
+   * Handle audioStreamEnd event - flushes cached audio so Gemini processes what it has
+   * This is sent when user mutes the microphone mid-speech
+   */
+  async handleAudioStreamEnd(clientId, message) {
+    const client = this.clients.get(clientId);
+    if (!client?.session) {
+      return this.sendError(clientId, 'No active session');
+    }
+
+    try {
+      await client.session.geminiSession.sendRealtimeInput({
+        audioStreamEnd: true
+      });
+    } catch (error) {
+      // Error sending audioStreamEnd - don't spam client
     }
   }
 
