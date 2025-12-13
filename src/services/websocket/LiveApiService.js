@@ -115,9 +115,6 @@ export class LiveApiService {
         case 'send_audio':
           await this.handleSendAudio(clientId, message);
           break;
-        case 'audio_stream_end':
-          await this.handleAudioStreamEnd(clientId, message);
-          break;
         case 'send_video':
           await this.handleSendVideo(clientId, message);
           break;
@@ -246,7 +243,7 @@ export class LiveApiService {
         outputAudioTranscription: {},
         inputAudioTranscription: {},
         // Use LOW media resolution for faster video/image processing
-        mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW,
+        mediaResolution: MediaResolution.MEDIA_RESOLUTION_MEDIUM,
       };
 
       // Build conversation context summary for system instruction
@@ -310,6 +307,9 @@ highlighter({ objects: [
 ]})
 
 The Apsara app will overlay these bounding boxes on the user's live camera/video feed to show them exactly where the objects are.
+
+=== VOICE & SPEED ADAPTATION ===
+You have native capability to change your voice and speaking speed based on user requests. If a user asks you to speak in a different voice, tone, or style (for example: "answer in a spooky whispering voice", "speak faster", "talk like a robot", "use a cheerful voice", "whisper this", "speak slowly"), you should adapt your voice and delivery style accordingly. This is a native feature of your voice system, so you can naturally adjust your tone, pace, and speaking style to match the user's request.
 
 Remember: You're having a real-time voice conversation, so keep responses natural and flowing.${contextSummary}`
         }]
@@ -772,25 +772,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       });
     } catch (error) {
       // Audio send error - don't spam client
-    }
-  }
-
-  /**
-   * Handle audioStreamEnd event - flushes cached audio so Gemini processes what it has
-   * This is sent when user mutes the microphone mid-speech
-   */
-  async handleAudioStreamEnd(clientId, message) {
-    const client = this.clients.get(clientId);
-    if (!client?.session) {
-      return this.sendError(clientId, 'No active session');
-    }
-
-    try {
-      await client.session.geminiSession.sendRealtimeInput({
-        audioStreamEnd: true
-      });
-    } catch (error) {
-      // Error sending audioStreamEnd - don't spam client
     }
   }
 
