@@ -469,10 +469,22 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
     // Priority 1: Audio data - send immediately for lowest latency
     // BUT: Filter out audio if we're expecting an interruption (text was just sent)
-    // Once we get outputTranscription, it means new response started - allow audio through
-    const shouldAllowAudio = !session.isInterrupting || session.currentOutputTranscription.length > 0;
+    // Once we get outputTranscription OR any modelTurn content, it means new response started - allow audio through
+    const hasNewResponse = session.currentOutputTranscription.length > 0 || 
+                          sc?.modelTurn?.parts?.length > 0 ||
+                          response.text;
+    const shouldAllowAudio = !session.isInterrupting || hasNewResponse;
     
     if (shouldAllowAudio) {
+      // If we're getting audio and there's a new response, clear interruption flag immediately
+      if (session.isInterrupting && hasNewResponse) {
+        if (session.interruptionTimeoutId) {
+          clearTimeout(session.interruptionTimeoutId);
+          session.interruptionTimeoutId = null;
+        }
+        session.isInterrupting = false;
+      }
+      
       if (response.data) {
         this.sendToClient(clientId, { type: 'audio_data', sessionId, data: response.data });
       } else if (sc?.modelTurn?.parts?.[0]?.inlineData?.data) {
@@ -482,7 +494,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         }
       }
     }
-    // If isInterrupting is true and no outputTranscription yet, we silently drop audio chunks
+    // If isInterrupting is true and no new response detected yet, we silently drop audio chunks
 
     // Priority 2: Transcriptions
     if (sc?.inputTranscription?.text) {
@@ -733,14 +745,15 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       client.session.isInterrupting = true;
       client.session.currentOutputTranscription = ''; // Reset to detect new response
       
-      // Set a timeout to clear the flag after 2 seconds as a safety measure
+      // Set a timeout to clear the flag after 500ms as a safety measure
       // This ensures audio can flow even if outputTranscription doesn't arrive
+      // Reduced from 2000ms to 500ms for faster response
       const timeoutId = setTimeout(() => {
         if (client.session && client.session.isInterrupting) {
           console.log(`[LiveAPI] Clearing interruption flag after timeout for session ${client.session.id}`);
           client.session.isInterrupting = false;
         }
-      }, 2000);
+      }, 500);
       
       // Store timeout ID to clear it if interrupted message arrives
       client.session.interruptionTimeoutId = timeoutId;
