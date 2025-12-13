@@ -409,6 +409,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       // Store session
       client.session = {
         id: sessionId,
+        sessionId, // Also store as sessionId for compatibility
         geminiSession: liveSession.session,
         model,
         conversationId: finalConversationId,
@@ -418,7 +419,9 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         currentInputTranscription: '',
         currentOutputTranscription: '',
         // Message buffer for saving complete turns
-        pendingMessages: []
+        pendingMessages: [],
+        // Track if we're expecting an interruption (text was sent during audio generation)
+        isInterrupting: false
       };
 
       this.sessionManager.addSession(sessionId, {
@@ -465,14 +468,18 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     // Priority 1: Audio data - send immediately for lowest latency
-    if (response.data) {
-      this.sendToClient(clientId, { type: 'audio_data', sessionId, data: response.data });
-    } else if (sc?.modelTurn?.parts?.[0]?.inlineData?.data) {
-      const part = sc.modelTurn.parts[0];
-      if (part.inlineData.mimeType?.startsWith('audio/')) {
-        this.sendToClient(clientId, { type: 'audio_data', sessionId, data: part.inlineData.data });
+    // BUT: Filter out audio if we're expecting an interruption (text was just sent)
+    if (!session.isInterrupting) {
+      if (response.data) {
+        this.sendToClient(clientId, { type: 'audio_data', sessionId, data: response.data });
+      } else if (sc?.modelTurn?.parts?.[0]?.inlineData?.data) {
+        const part = sc.modelTurn.parts[0];
+        if (part.inlineData.mimeType?.startsWith('audio/')) {
+          this.sendToClient(clientId, { type: 'audio_data', sessionId, data: part.inlineData.data });
+        }
       }
     }
+    // If isInterrupting is true, we silently drop audio chunks until interrupted message arrives
 
     // Priority 2: Transcriptions
     if (sc?.inputTranscription?.text) {
@@ -488,6 +495,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     // Priority 3: Turn/Generation events - save async (don't block)
     if (sc?.turnComplete) {
       this.saveTurnMessages(clientId, sessionId); // No await - fire and forget
+      session.isInterrupting = false; // Clear interruption flag on turn complete
       this.sendToClient(clientId, { type: 'turn_complete', sessionId });
     }
 
@@ -495,12 +503,14 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       if (session.currentOutputTranscription || session.currentInputTranscription) {
         this.saveTurnMessages(clientId, sessionId);
       }
+      session.isInterrupting = false; // Clear interruption flag on generation complete
       this.sendToClient(clientId, { type: 'generation_complete', sessionId });
     }
 
     if (sc?.interrupted) {
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
+      session.isInterrupting = false; // Clear interruption flag
       this.sendToClient(clientId, { type: 'interrupted', sessionId });
     }
 
@@ -689,15 +699,22 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     try {
+      // Mark that we're expecting an interruption - this will filter out late audio chunks
+      client.session.isInterrupting = true;
+      
+      // Immediately notify client that interruption is happening (for faster UI response)
+      this.sendToClient(clientId, { type: 'interrupted', sessionId: client.session.id });
+      
       // Save the user text message to conversation immediately
       await this.saveUserTextMessage(clientId, text);
 
-      // Send text to Gemini via sendClientContent
+      // Send text to Gemini via sendClientContent (this will trigger interruption)
       await client.session.geminiSession.sendClientContent({
         turns: [{ role: 'user', parts: [{ text }] }],
         turnComplete: true
       });
     } catch (error) {
+      client.session.isInterrupting = false; // Reset on error
       this.sendError(clientId, `Failed to send text: ${error.message}`);
     }
   }
