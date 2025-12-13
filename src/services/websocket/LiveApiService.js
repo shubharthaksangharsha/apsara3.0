@@ -469,7 +469,10 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
     // Priority 1: Audio data - send immediately for lowest latency
     // BUT: Filter out audio if we're expecting an interruption (text was just sent)
-    if (!session.isInterrupting) {
+    // Once we get outputTranscription, it means new response started - allow audio through
+    const shouldAllowAudio = !session.isInterrupting || session.currentOutputTranscription.length > 0;
+    
+    if (shouldAllowAudio) {
       if (response.data) {
         this.sendToClient(clientId, { type: 'audio_data', sessionId, data: response.data });
       } else if (sc?.modelTurn?.parts?.[0]?.inlineData?.data) {
@@ -479,7 +482,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         }
       }
     }
-    // If isInterrupting is true, we silently drop audio chunks until interrupted message arrives
+    // If isInterrupting is true and no outputTranscription yet, we silently drop audio chunks
 
     // Priority 2: Transcriptions
     if (sc?.inputTranscription?.text) {
@@ -488,6 +491,15 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     if (sc?.outputTranscription?.text) {
+      // If we get output transcription, it means a new response is starting
+      // Clear interruption flag to allow new audio through
+      if (session.isInterrupting) {
+        if (session.interruptionTimeoutId) {
+          clearTimeout(session.interruptionTimeoutId);
+          session.interruptionTimeoutId = null;
+        }
+        session.isInterrupting = false;
+      }
       session.currentOutputTranscription += sc.outputTranscription.text;
       this.sendToClient(clientId, { type: 'output_transcription', sessionId, text: session.currentOutputTranscription });
     }
@@ -495,6 +507,10 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     // Priority 3: Turn/Generation events - save async (don't block)
     if (sc?.turnComplete) {
       this.saveTurnMessages(clientId, sessionId); // No await - fire and forget
+      if (session.interruptionTimeoutId) {
+        clearTimeout(session.interruptionTimeoutId);
+        session.interruptionTimeoutId = null;
+      }
       session.isInterrupting = false; // Clear interruption flag on turn complete
       this.sendToClient(clientId, { type: 'turn_complete', sessionId });
     }
@@ -503,6 +519,10 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       if (session.currentOutputTranscription || session.currentInputTranscription) {
         this.saveTurnMessages(clientId, sessionId);
       }
+      if (session.interruptionTimeoutId) {
+        clearTimeout(session.interruptionTimeoutId);
+        session.interruptionTimeoutId = null;
+      }
       session.isInterrupting = false; // Clear interruption flag on generation complete
       this.sendToClient(clientId, { type: 'generation_complete', sessionId });
     }
@@ -510,8 +530,17 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     if (sc?.interrupted) {
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
+      if (session.interruptionTimeoutId) {
+        clearTimeout(session.interruptionTimeoutId);
+        session.interruptionTimeoutId = null;
+      }
       session.isInterrupting = false; // Clear interruption flag
       this.sendToClient(clientId, { type: 'interrupted', sessionId });
+    }
+    
+    // Also handle sessionResumptionUpdate and goAway if needed
+    if (response.sessionResumptionUpdate) {
+      // Handle session resumption if needed
     }
 
     if (response.goAway) {
@@ -700,7 +729,21 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
     try {
       // Mark that we're expecting an interruption - this will filter out late audio chunks
+      // Reset output transcription so we can detect when new response starts
       client.session.isInterrupting = true;
+      client.session.currentOutputTranscription = ''; // Reset to detect new response
+      
+      // Set a timeout to clear the flag after 2 seconds as a safety measure
+      // This ensures audio can flow even if outputTranscription doesn't arrive
+      const timeoutId = setTimeout(() => {
+        if (client.session && client.session.isInterrupting) {
+          console.log(`[LiveAPI] Clearing interruption flag after timeout for session ${client.session.id}`);
+          client.session.isInterrupting = false;
+        }
+      }, 2000);
+      
+      // Store timeout ID to clear it if interrupted message arrives
+      client.session.interruptionTimeoutId = timeoutId;
       
       // Immediately notify client that interruption is happening (for faster UI response)
       this.sendToClient(clientId, { type: 'interrupted', sessionId: client.session.id });
@@ -714,6 +757,10 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         turnComplete: true
       });
     } catch (error) {
+      if (client.session?.interruptionTimeoutId) {
+        clearTimeout(client.session.interruptionTimeoutId);
+        client.session.interruptionTimeoutId = null;
+      }
       client.session.isInterrupting = false; // Reset on error
       this.sendError(clientId, `Failed to send text: ${error.message}`);
     }
