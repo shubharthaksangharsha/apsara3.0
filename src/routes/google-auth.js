@@ -95,7 +95,10 @@ router.post('/google', googleAuthRateLimiter, asyncHandler(async (req, res) => {
         console.log(`🔗 Linking Google account to existing user: ${email}`);
         
         user.googleId = googleId;
-        user.profilePicture = profilePicture || user.profilePicture;
+        // Only set profile picture if user doesn't have one yet
+        if (!user.profilePicture) {
+          user.profilePicture = profilePicture || googlePayload.picture;
+        }
         user.isEmailVerified = true; // Google verified the email
         
         // If user was local-only, now they have both options
@@ -126,7 +129,7 @@ router.post('/google', googleAuthRateLimiter, asyncHandler(async (req, res) => {
       // Existing Google user - just update their info
       console.log(`👋 Welcome back Google user: ${email}`);
       
-      user.profilePicture = profilePicture || user.profilePicture;
+      // Don't update profile picture on login - user may have customized it
       user.usage.lastLogin = new Date();
       await user.save();
     }
@@ -232,7 +235,10 @@ router.post('/', googleAuthRateLimiter, asyncHandler(async (req, res) => {
       if (user) {
         console.log(`🔗 Linking Google account to existing user: ${email}`);
         user.googleId = googleId;
-        user.profilePicture = profilePicture || user.profilePicture;
+        // Only set profile picture if user doesn't have one yet
+        if (!user.profilePicture) {
+          user.profilePicture = profilePicture || googlePayload.picture;
+        }
         user.isEmailVerified = true;
         if (user.authProvider === 'local') {
           user.authProvider = 'local';
@@ -255,7 +261,7 @@ router.post('/', googleAuthRateLimiter, asyncHandler(async (req, res) => {
       }
     } else {
       console.log(`👋 Welcome back Google user: ${email}`);
-      user.profilePicture = profilePicture || user.profilePicture;
+      // Don't update profile picture on login - user may have customized it
       user.usage.lastLogin = new Date();
       await user.save();
     }
