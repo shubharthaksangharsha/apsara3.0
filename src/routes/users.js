@@ -1007,12 +1007,23 @@ router.put('/profile', authMiddleware, async (req, res) => {
     const { fullName, preferences, profilePicture } = req.body;
     const user = req.user;
 
+    console.log('📝 Update profile request:', {
+      userId: user._id,
+      hasFullName: !!fullName,
+      hasPreferences: !!preferences,
+      hasProfilePicture: !!profilePicture,
+      profilePictureType: profilePicture ? (profilePicture.startsWith('data:') ? 'base64' : 'url') : 'none',
+      profilePictureLength: profilePicture ? profilePicture.length : 0
+    });
+
     if (fullName) {
       user.fullName = fullName;
+      console.log('✅ Updated fullName to:', fullName);
     }
 
     if (preferences) {
       user.preferences = { ...user.preferences, ...preferences };
+      console.log('✅ Updated preferences');
     }
 
     if (profilePicture !== undefined) {
@@ -1022,7 +1033,10 @@ router.put('/profile', authMiddleware, async (req, res) => {
         const base64Length = profilePicture.length;
         const maxBase64Length = 2 * 1024 * 1024 * 1.37; // ~2MB in base64 (33% overhead)
         
+        console.log('🖼️  Processing base64 image, length:', base64Length);
+        
         if (base64Length > maxBase64Length) {
+          console.log('❌ Image too large:', base64Length, 'vs max:', maxBase64Length);
           return res.status(400).json({
             success: false,
             message: 'Profile picture too large. Please use an image smaller than 2MB.'
@@ -1030,11 +1044,13 @@ router.put('/profile', authMiddleware, async (req, res) => {
         }
       }
       user.profilePicture = profilePicture;
+      console.log('✅ Updated profilePicture, length:', profilePicture ? profilePicture.length : 0);
     }
 
     await user.save();
+    console.log('💾 User saved successfully');
 
-    res.json({
+    const responseData = {
       success: true,
       message: 'Profile updated successfully',
       data: {
@@ -1048,7 +1064,21 @@ router.put('/profile', authMiddleware, async (req, res) => {
           hasPassword: user.password && user.password.startsWith('$2')
         }
       }
+    };
+    
+    console.log('📤 Sending response:', {
+      ...responseData,
+      data: {
+        user: {
+          ...responseData.data.user,
+          profilePicture: responseData.data.user.profilePicture ? 
+            `${responseData.data.user.profilePicture.substring(0, 50)}...` : 
+            null
+        }
+      }
     });
+
+    res.json(responseData);
 
   } catch (error) {
     console.error('Update profile error:', error);
