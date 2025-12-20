@@ -1231,7 +1231,7 @@ router.post('/file-search/upload', fileUploadRateLimiter, (req, res, next) => {
       
       while (!operation.done && pollCount < maxPolls) {
         await new Promise(resolve => setTimeout(resolve, 1000));
-        const opResult = await ProviderManager.getOperation(operation, 'google');
+        const opResult = await ProviderManager.getOperation(operation.name, 'google');
         operation = opResult.operation;
         pollCount++;
       }
