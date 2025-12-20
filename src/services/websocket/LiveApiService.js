@@ -161,6 +161,17 @@ export class LiveApiService {
         return this.sendError(clientId, 'userId is required');
       }
 
+      // Get user to check for personalization preferences
+      const User = (await import('../../models/User.js')).default;
+      const user = await User.findById(userId);
+      
+      // Use user's preferred voice if available, otherwise use provided or default
+      let finalVoice = voice;
+      if (user?.preferences?.selectedVoice) {
+        finalVoice = user.preferences.selectedVoice;
+        console.log(`🎤 Using user's preferred voice: ${finalVoice}`);
+      }
+
       const client = this.clients.get(clientId);
       
       // User-based rate limiting for Live API sessions
@@ -234,7 +245,7 @@ export class LiveApiService {
         speechConfig: {
           voiceConfig: {
             prebuiltVoiceConfig: {
-              voiceName: voice
+              voiceName: finalVoice
             }
           },
           languageCode: language
@@ -256,6 +267,16 @@ export class LiveApiService {
           contextSummary += `\n${role}: ${text}`;
         });
         contextSummary += '\n\n=== END OF HISTORY ===\nContinue the conversation naturally. If the user asks about previous discussions, refer to the history above.\n';
+      }
+
+      // Add custom system instructions from user preferences
+      let customInstructionsSummary = '';
+      if (user?.preferences?.customSystemInstructions) {
+        const customInstructions = user.preferences.customSystemInstructions.trim();
+        if (customInstructions) {
+          customInstructionsSummary = `\n\n=== USER'S CUSTOM INSTRUCTIONS ===\nThe user has provided these custom instructions for how you should behave:\n${customInstructions}\n\nPlease follow these instructions while maintaining your core personality.\n`;
+          console.log(`📝 Using custom system instructions from user preferences`);
+        }
       }
 
       // Set system instruction - use provided or default Apsara AI personality
@@ -311,7 +332,7 @@ The Apsara app will overlay these bounding boxes on the user's live camera/video
 === VOICE & SPEED ADAPTATION ===
 You have native capability to change your voice and speaking speed based on user requests. If a user asks you to speak in a different voice, tone, or style (for example: "answer in a spooky whispering voice", "speak faster", "talk like a robot", "use a cheerful voice", "whisper this", "speak slowly"), you should adapt your voice and delivery style accordingly. This is a native feature of your voice system, so you can naturally adjust your tone, pace, and speaking style to match the user's request.
 
-Remember: You're having a real-time voice conversation, so keep responses natural and flowing.${contextSummary}`
+Remember: You're having a real-time voice conversation, so keep responses natural and flowing.${customInstructionsSummary}${contextSummary}`
         }]
       };
       

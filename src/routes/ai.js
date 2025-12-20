@@ -595,6 +595,18 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
       systemInstruction: config.systemInstruction || conversation.config?.rest?.systemInstruction
     };
 
+    // Add custom system instructions from user preferences
+    if (!config.systemInstruction && user.preferences?.customSystemInstructions) {
+      const customInstructions = user.preferences.customSystemInstructions.trim();
+      if (customInstructions) {
+        // Append custom instructions to existing system instruction
+        const baseInstruction = conversation.config?.rest?.systemInstruction || '';
+        generationConfig.systemInstruction = baseInstruction 
+          ? `${baseInstruction}\n\nUser's custom instructions: ${customInstructions}`
+          : customInstructions;
+      }
+    }
+
     // Add thinking config if specified
     if (config.thinkingConfig) {
       generationConfig.thinkingConfig = config.thinkingConfig;

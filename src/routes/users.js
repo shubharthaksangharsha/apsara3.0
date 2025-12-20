@@ -1455,3 +1455,5 @@ router.get('/preferences', authMiddleware, async (req, res) => {
     });
   }
 });
+
+export default router;
