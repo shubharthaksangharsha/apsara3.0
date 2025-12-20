@@ -1333,7 +1333,7 @@ router.get('/test-email', async (req, res) => {
 // Update user preferences (personalization)
 router.put('/preferences', authMiddleware, async (req, res) => {
   try {
-    const { customSystemInstructions, selectedVoice, theme } = req.body;
+    const { customSystemInstructions, selectedVoice, theme, useFileSearchApi } = req.body;
     const user = req.user;
 
     console.log('🎨 Update preferences request:', {
@@ -1341,7 +1341,8 @@ router.put('/preferences', authMiddleware, async (req, res) => {
       hasCustomInstructions: !!customSystemInstructions,
       instructionsLength: customSystemInstructions?.length,
       selectedVoice,
-      theme
+      theme,
+      useFileSearchApi
     });
 
     // Validate custom system instructions
@@ -1397,6 +1398,19 @@ router.put('/preferences', authMiddleware, async (req, res) => {
       console.log('✅ Updated theme to:', normalizedTheme);
     }
 
+    // Validate useFileSearchApi
+    if (useFileSearchApi !== undefined) {
+      if (typeof useFileSearchApi !== 'boolean') {
+        return res.status(400).json({
+          success: false,
+          message: 'useFileSearchApi must be a boolean'
+        });
+      }
+      
+      user.preferences.useFileSearchApi = useFileSearchApi;
+      console.log('✅ Updated useFileSearchApi to:', useFileSearchApi);
+    }
+
     await user.save();
     console.log('💾 Preferences saved successfully');
 
@@ -1407,7 +1421,8 @@ router.put('/preferences', authMiddleware, async (req, res) => {
         preferences: {
           customSystemInstructions: user.preferences.customSystemInstructions || '',
           selectedVoice: user.preferences.selectedVoice || 'Puck',
-          theme: user.preferences.theme || 'auto'
+          theme: user.preferences.theme || 'auto',
+          useFileSearchApi: user.preferences.useFileSearchApi || false
         }
       }
     };
