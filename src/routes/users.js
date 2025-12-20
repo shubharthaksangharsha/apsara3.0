@@ -1445,7 +1445,8 @@ router.get('/preferences', authMiddleware, async (req, res) => {
     const user = req.user;
 
     console.log('📖 Get preferences request:', {
-      userId: user._id
+      userId: user._id,
+      useFileSearchApi: user.preferences?.useFileSearchApi
     });
 
     const responseData = {
@@ -1454,7 +1455,8 @@ router.get('/preferences', authMiddleware, async (req, res) => {
         preferences: {
           customSystemInstructions: user.preferences?.customSystemInstructions || '',
           selectedVoice: user.preferences?.selectedVoice || 'Puck',
-          theme: user.preferences?.theme || 'auto'
+          theme: user.preferences?.theme || 'auto',
+          useFileSearchApi: user.preferences?.useFileSearchApi || false
         }
       }
     };
