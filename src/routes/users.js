@@ -1330,4 +1330,128 @@ router.get('/test-email', async (req, res) => {
   }
 });
 
-export default router; 
+// Update user preferences (personalization)
+router.put('/preferences', authMiddleware, async (req, res) => {
+  try {
+    const { customSystemInstructions, selectedVoice, theme } = req.body;
+    const user = req.user;
+
+    console.log('🎨 Update preferences request:', {
+      userId: user._id,
+      hasCustomInstructions: !!customSystemInstructions,
+      instructionsLength: customSystemInstructions?.length,
+      selectedVoice,
+      theme
+    });
+
+    // Validate custom system instructions
+    if (customSystemInstructions !== undefined) {
+      if (typeof customSystemInstructions !== 'string') {
+        return res.status(400).json({
+          success: false,
+          message: 'Custom instructions must be a string'
+        });
+      }
+      
+      if (customSystemInstructions.length > 500) {
+        return res.status(400).json({
+          success: false,
+          message: 'Custom instructions cannot exceed 500 characters'
+        });
+      }
+      
+      user.preferences.customSystemInstructions = customSystemInstructions.trim();
+      console.log('✅ Updated custom instructions');
+    }
+
+    // Validate selected voice
+    if (selectedVoice !== undefined) {
+      const validVoices = ['Puck', 'Kore', 'Charon', 'Aoede', 'Fenrir', 'Enceladus', 'Algieba', 'Achird', 'Gacrux', 'Sadachbia'];
+      
+      if (!validVoices.includes(selectedVoice)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid voice. Must be one of: ${validVoices.join(', ')}`
+        });
+      }
+      
+      user.preferences.selectedVoice = selectedVoice;
+      console.log('✅ Updated selected voice to:', selectedVoice);
+    }
+
+    // Validate theme
+    if (theme !== undefined) {
+      const validThemes = ['light', 'dark', 'auto'];
+      
+      // Convert to lowercase for case-insensitive comparison
+      const normalizedTheme = theme.toLowerCase();
+      
+      if (!validThemes.includes(normalizedTheme)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid theme. Must be one of: ${validThemes.join(', ')}`
+        });
+      }
+      
+      user.preferences.theme = normalizedTheme;
+      console.log('✅ Updated theme to:', normalizedTheme);
+    }
+
+    await user.save();
+    console.log('💾 Preferences saved successfully');
+
+    const responseData = {
+      success: true,
+      message: 'Preferences updated successfully',
+      data: {
+        preferences: {
+          customSystemInstructions: user.preferences.customSystemInstructions || '',
+          selectedVoice: user.preferences.selectedVoice || 'Puck',
+          theme: user.preferences.theme || 'auto'
+        }
+      }
+    };
+    
+    console.log('📤 Sending preferences response:', responseData);
+    res.json(responseData);
+
+  } catch (error) {
+    console.error('Update preferences error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Get user preferences
+router.get('/preferences', authMiddleware, async (req, res) => {
+  try {
+    const user = req.user;
+
+    console.log('📖 Get preferences request:', {
+      userId: user._id
+    });
+
+    const responseData = {
+      success: true,
+      data: {
+        preferences: {
+          customSystemInstructions: user.preferences?.customSystemInstructions || '',
+          selectedVoice: user.preferences?.selectedVoice || 'Puck',
+          theme: user.preferences?.theme || 'auto'
+        }
+      }
+    };
+    
+    console.log('📤 Sending preferences:', responseData);
+    res.json(responseData);
+
+  } catch (error) {
+    console.error('Get preferences error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});

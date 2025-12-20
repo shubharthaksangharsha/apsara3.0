@@ -110,6 +110,17 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: true
       }
+    },
+    // Personalization preferences
+    customSystemInstructions: {
+      type: String,
+      maxlength: [500, 'Custom instructions cannot exceed 500 characters'],
+      default: ''
+    },
+    selectedVoice: {
+      type: String,
+      enum: ['Puck', 'Kore', 'Charon', 'Aoede', 'Fenrir', 'Enceladus', 'Algieba', 'Achird', 'Gacrux', 'Sadachbia'],
+      default: 'Puck'
     }
   },
   usage: {
