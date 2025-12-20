@@ -57,7 +57,7 @@ const messageSchema = new mongoose.Schema({
       },
       storageProvider: {     // Added: Storage provider info
         type: String,
-        enum: ['local', 's3', 'google-file-api'],
+        enum: ['local', 's3', 'google-file-api', 'google-file-search'],
         default: 'local'
       },
       metadata: mongoose.Schema.Types.Mixed
