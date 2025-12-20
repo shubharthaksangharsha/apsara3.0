@@ -403,33 +403,222 @@ export class GoogleProvider extends BaseProvider {
   }
 
   /**
-   * Count tokens for given content
+   * Create a File Search store
    */
-  async countTokens(params) {
+  async createFileSearchStore(params) {
     this.validateInitialization();
 
-    const { model = 'gemini-2.5-flash', contents } = params;
+    const { displayName } = params;
 
     try {
-      const response = await this.client.models.countTokens({
-        model,
-        contents: this.normalizeContent(contents)
+      const store = await this.client.fileSearchStores.create({
+        config: { displayName }
       });
 
       return {
         success: true,
         provider: this.name,
-        model,
-        totalTokens: response.totalTokens,
-        response
+        store,
+        name: store.name,
+        displayName: store.displayName
       };
     } catch (error) {
-      console.error('Google Count Tokens Error:', error);
+      console.error('Google Create File Search Store Error:', error);
       throw this.createProviderError(error);
     }
   }
 
+  /**
+   * List File Search stores
+   */
+  async listFileSearchStores(config = {}) {
+    this.validateInitialization();
 
+    try {
+      const stores = [];
+      const listResponse = await this.client.fileSearchStores.list(config);
+      
+      for await (const store of listResponse) {
+        stores.push(store);
+      }
+
+      return {
+        success: true,
+        provider: this.name,
+        stores
+      };
+    } catch (error) {
+      console.error('Google List File Search Stores Error:', error);
+      throw this.createProviderError(error);
+    }
+  }
+
+  /**
+   * Get a File Search store
+   */
+  async getFileSearchStore(name) {
+    this.validateInitialization();
+
+    try {
+      const store = await this.client.fileSearchStores.get({ name });
+      return {
+        success: true,
+        provider: this.name,
+        store
+      };
+    } catch (error) {
+      console.error('Google Get File Search Store Error:', error);
+      throw this.createProviderError(error);
+    }
+  }
+
+  /**
+   * Delete a File Search store
+   */
+  async deleteFileSearchStore(name, force = false) {
+    this.validateInitialization();
+
+    try {
+      await this.client.fileSearchStores.delete({ name, config: { force } });
+      return {
+        success: true,
+        provider: this.name,
+        message: 'File Search store deleted successfully'
+      };
+    } catch (error) {
+      console.error('Google Delete File Search Store Error:', error);
+      throw this.createProviderError(error);
+    }
+  }
+
+  /**
+   * Import a file into a File Search store
+   */
+  async importFileToFileSearchStore(params) {
+    this.validateInitialization();
+
+    const { fileSearchStoreName, fileName } = params;
+
+    try {
+      const operation = await this.client.fileSearchStores.importFile({
+        fileSearchStoreName,
+        fileName
+      });
+
+      return {
+        success: true,
+        provider: this.name,
+        operation,
+        operationName: operation.name
+      };
+    } catch (error) {
+      console.error('Google Import File to File Search Store Error:', error);
+      throw this.createProviderError(error);
+    }
+  }
+
+  /**
+   * Upload file directly to File Search store (combined upload + import)
+   */
+  async uploadToFileSearchStore(params) {
+    this.validateInitialization();
+
+    const { file, fileSearchStoreName, config = {} } = params;
+
+    try {
+      const operation = await this.client.fileSearchStores.upload_to_file_search_store({
+        file,
+        file_search_store_name: fileSearchStoreName,
+        config: {
+          displayName: config.displayName,
+          ...config
+        }
+      });
+
+      return {
+        success: true,
+        provider: this.name,
+        operation,
+        operationName: operation.name
+      };
+    } catch (error) {
+      console.error('Google Upload to File Search Store Error:', error);
+      throw this.createProviderError(error);
+    }
+  }
+
+  /**
+   * Get operation status
+   */
+  async getOperation(operation) {
+    this.validateInitialization();
+
+    try {
+      const result = await this.client.operations.get(operation);
+      return {
+        success: true,
+        provider: this.name,
+        operation: result,
+        done: result.done
+      };
+    } catch (error) {
+      console.error('Google Get Operation Error:', error);
+      throw this.createProviderError(error);
+    }
+  }
+
+  /**
+   * Generate content with File Search
+   */
+  async generateContentWithFileSearch(params) {
+    this.validateInitialization();
+
+    const { model = 'gemini-2.5-flash', contents, fileSearchStoreNames, config = {} } = params;
+
+    try {
+      const normalizedConfig = this.normalizeConfig(config);
+      const requestParams = {
+        model,
+        contents: this.normalizeContent(contents),
+        config: {
+          ...normalizedConfig,
+          tools: [
+            {
+              fileSearch: {
+                fileSearchStoreNames
+              }
+            }
+          ],
+          ...(config.systemInstruction && { systemInstruction: config.systemInstruction })
+        }
+      };
+
+      const response = await this.client.models.generateContent(requestParams);
+      
+      // Extract grounding metadata and citations
+      let citations = [];
+      if (response.candidates && response.candidates.length > 0) {
+        const candidate = response.candidates[0];
+        if (candidate.groundingMetadata && candidate.groundingMetadata.citations) {
+          citations = candidate.groundingMetadata.citations;
+        }
+      }
+
+      return {
+        success: true,
+        provider: this.name,
+        model,
+        text: response.text,
+        citations,
+        response: response,
+        usageMetadata: response.usageMetadata,
+        finishReason: response.finishReason
+      };
+    } catch (error) {
+      console.error('Google File Search Generate Content Error:', error);
+      throw this.createProviderError(error);
+    }
+  }
 
   /**
    * Create ephemeral tokens
@@ -612,4 +801,4 @@ export class GoogleProvider extends BaseProvider {
     console.log(`✅ Processed chunk - Text: "${text}", Thought: "${thought || 'none'}", Thinking: ${isThinking}, Signatures: ${hasThoughtSignatures}`);
     return { text, thought, isThinking, hasThoughtSignatures };
   }
-} 
+}

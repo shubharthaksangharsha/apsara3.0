@@ -240,18 +240,108 @@ export class ProviderManager {
     return await providerInstance.deleteFile(name);
   }
 
-
+  /**
+   * Create a File Search store using specified or default provider
+   * @param {Object} params - Store creation parameters
+   * @param {string} params.displayName - Display name for the store
+   * @param {string} params.provider - Provider name (optional)
+   * @returns {Promise<Object>} Store creation response
+   */
+  async createFileSearchStore(params) {
+    const { provider: providerName, ...restParams } = params;
+    const provider = this.getProvider(providerName);
+    return await provider.createFileSearchStore(restParams);
+  }
 
   /**
-   * Create ephemeral tokens using specified or default provider
-   * @param {Object} config - Token configuration
+   * List File Search stores using specified or default provider
+   * @param {Object} config - List configuration
    * @param {string} config.provider - Provider name (optional)
-   * @returns {Promise<Object>} Token response
+   * @returns {Promise<Object>} List of stores
    */
-  async createEphemeralToken(config) {
+  async listFileSearchStores(config = {}) {
     const { provider: providerName, ...restConfig } = config;
     const provider = this.getProvider(providerName);
-    return await provider.createEphemeralToken(restConfig);
+    return await provider.listFileSearchStores(restConfig);
+  }
+
+  /**
+   * Get a File Search store using specified or default provider
+   * @param {string} name - Store name/ID
+   * @param {string} provider - Provider name (optional)
+   * @returns {Promise<Object>} Store details
+   */
+  async getFileSearchStore(name, provider) {
+    const providerInstance = this.getProvider(provider);
+    return await providerInstance.getFileSearchStore(name);
+  }
+
+  /**
+   * Delete a File Search store using specified or default provider
+   * @param {string} name - Store name/ID
+   * @param {boolean} force - Force delete even if not empty
+   * @param {string} provider - Provider name (optional)
+   * @returns {Promise<void>}
+   */
+  async deleteFileSearchStore(name, force, provider) {
+    const providerInstance = this.getProvider(provider);
+    return await providerInstance.deleteFileSearchStore(name, force);
+  }
+
+  /**
+   * Import a file into a File Search store
+   * @param {Object} params - Import parameters
+   * @param {string} params.fileSearchStoreName - Target store name
+   * @param {string} params.fileName - File name to import
+   * @param {string} params.provider - Provider name (optional)
+   * @returns {Promise<Object>} Import operation response
+   */
+  async importFileToFileSearchStore(params) {
+    const { provider: providerName, ...restParams } = params;
+    const provider = this.getProvider(providerName);
+    return await provider.importFileToFileSearchStore(restParams);
+  }
+
+  /**
+   * Upload file directly to File Search store
+   * @param {Object} params - Upload parameters
+   * @param {string} params.file - File path
+   * @param {string} params.fileSearchStoreName - Target store name
+   * @param {Object} params.config - Upload configuration
+   * @param {string} params.provider - Provider name (optional)
+   * @returns {Promise<Object>} Upload operation response
+   */
+  async uploadToFileSearchStore(params) {
+    const { provider: providerName, ...restParams } = params;
+    const provider = this.getProvider(providerName);
+    return await provider.uploadToFileSearchStore(restParams);
+  }
+
+  /**
+   * Get operation status
+   * @param {Object} operation - Operation object
+   * @param {string} provider - Provider name (optional)
+   * @returns {Promise<Object>} Operation status
+   */
+  async getOperation(operation, provider) {
+    const providerInstance = this.getProvider(provider);
+    return await providerInstance.getOperation(operation);
+  }
+
+  /**
+   * Generate content with File Search
+   * @param {Object} params - Generation parameters
+   * @param {string} params.model - Model name
+   * @param {string|Array} params.contents - Content to generate from
+   * @param {Array<string>} params.fileSearchStoreNames - Store names to search
+   * @param {Object} params.config - Generation configuration
+   * @param {string} params.provider - Provider name (optional)
+   * @returns {Promise<Object>} Generated content with citations
+   */
+  async generateContentWithFileSearch(params) {
+    const { provider: providerName, ...restParams } = params;
+    const provider = this.getProvider(providerName);
+    return await provider.generateContentWithFileSearch(restParams);
   }
 
   /**
@@ -365,4 +455,4 @@ export class ProviderManager {
 }
 
 // Create and export a singleton instance
-export default new ProviderManager(); 
+export default new ProviderManager();

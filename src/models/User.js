@@ -121,6 +121,19 @@ const userSchema = new mongoose.Schema({
       type: String,
       enum: ['Puck', 'Kore', 'Charon', 'Aoede', 'Fenrir', 'Enceladus', 'Algieba', 'Achird', 'Gacrux', 'Sadachbia'],
       default: 'Puck'
+    },
+    accentColor: {
+      type: String,
+      enum: ['Purple', 'Blue', 'Green', 'Red', 'Orange', 'Pink', 'Teal', 'Indigo'],
+      default: 'Purple'
+    },
+    useFileSearchApi: {
+      type: Boolean,
+      default: false
+    },
+    fileSearchStoreName: {
+      type: String,
+      default: null
     }
   },
   usage: {
@@ -338,4 +351,4 @@ userSchema.methods.toJSON = function() {
 
 const User = mongoose.model('User', userSchema);
 
-export default User; 
+export default User;

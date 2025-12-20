@@ -1116,6 +1116,301 @@ router.get('/supported-types', (req, res) => {
   });
 });
 
+/**
+ * @route POST /api/files/file-search/upload
+ * @desc Upload a file to File Search store
+ * @access Authenticated
+ */
+router.post('/file-search/upload', fileUploadRateLimiter, (req, res, next) => {
+  upload.array('files', 10)(req, res, (err) => {
+    if (err) {
+      let errorMessage = 'File upload failed';
+      let errorCode = 400;
+      
+      if (err instanceof multer.MulterError) {
+        switch (err.code) {
+          case 'LIMIT_FILE_SIZE':
+            const maxSizeMB = Math.round((parseInt(process.env.MAX_FILE_SIZE) || 100 * 1024 * 1024) / 1024 / 1024);
+            errorMessage = `File too large. Maximum file size is ${maxSizeMB}MB`;
+            break;
+          case 'LIMIT_FILE_COUNT':
+            errorMessage = 'Too many files. Maximum 10 files per request';
+            break;
+          default:
+            errorMessage = `Upload error: ${err.message}`;
+        }
+      } else {
+        errorMessage = err.message || 'Unknown upload error';
+      }
+      
+      return res.status(errorCode).json({
+        success: false,
+        error: { message: errorMessage }
+      });
+    }
+    next();
+  });
+}, asyncHandler(async (req, res) => {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: { message: 'No files provided' }
+    });
+  }
+
+  const { userId, displayName } = req.body;
+  
+  if (!userId) {
+    await Promise.all(req.files.map(file => fs.unlink(file.path).catch(() => {})));
+    return res.status(400).json({
+      success: false,
+      error: { message: 'userId is required' }
+    });
+  }
+
+  try {
+    // Import User model
+    const User = (await import('../models/User.js')).default;
+    const user = await User.findOne({ _id: userId });
+    
+    if (!user) {
+      await Promise.all(req.files.map(file => fs.unlink(file.path).catch(() => {})));
+      return res.status(404).json({
+        success: false,
+        error: { message: 'User not found' }
+      });
+    }
+
+    // Check if user has File Search enabled
+    if (!user.preferences?.useFileSearchApi) {
+      await Promise.all(req.files.map(file => fs.unlink(file.path).catch(() => {})));
+      return res.status(400).json({
+        success: false,
+        error: { message: 'File Search API is not enabled for this user' }
+      });
+    }
+
+    // Create or get File Search store for user
+    let fileSearchStoreName = user.preferences.fileSearchStoreName;
+    
+    if (!fileSearchStoreName) {
+      const storeResult = await ProviderManager.createFileSearchStore({
+        displayName: `${user.fullName || user.email}'s File Search Store`,
+        provider: 'google'
+      });
+      
+      fileSearchStoreName = storeResult.name;
+      user.preferences.fileSearchStoreName = fileSearchStoreName;
+      await user.save();
+    }
+
+    const uploadResults = [];
+
+    for (const file of req.files) {
+      // Upload file to Gemini Files API first
+      const uploadResult = await ProviderManager.uploadFile({
+        provider: 'google',
+        file: file.path,
+        config: {
+          mimeType: file.mimetype,
+          displayName: displayName || file.originalname
+        }
+      });
+
+      // Import file into File Search store
+      const importOperation = await ProviderManager.importFileToFileSearchStore({
+        fileSearchStoreName,
+        fileName: uploadResult.name,
+        provider: 'google'
+      });
+
+      // Poll operation status (simplified - in production use webhooks or async jobs)
+      let operation = importOperation.operation;
+      let pollCount = 0;
+      const maxPolls = 20; // Max 20 seconds
+      
+      while (!operation.done && pollCount < maxPolls) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const opResult = await ProviderManager.getOperation(operation, 'google');
+        operation = opResult.operation;
+        pollCount++;
+      }
+
+      // Save file record to database
+      const fileId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const fileRecord = new File({
+        fileId,
+        userId,
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+        size: file.size,
+        type: getFileType(file.mimetype),
+        storage: {
+          provider: 'google-file-search',
+          path: uploadResult.name,
+          url: uploadResult.uri,
+          fileSearchStoreName,
+          expiresAt: null // File Search stores files indefinitely
+        },
+        aiProviderFile: {
+          provider: 'google',
+          fileUri: uploadResult.uri,
+          uploadResponse: uploadResult
+        }
+      });
+
+      await fileRecord.save();
+
+      uploadResults.push({
+        fileId: fileRecord.fileId,
+        originalName: file.originalname,
+        size: file.size,
+        mimeType: file.mimetype,
+        storageMethod: 'google-file-search',
+        uri: uploadResult.uri,
+        importStatus: operation.done ? 'completed' : 'pending'
+      });
+
+      // Clean up local temp file
+      await fs.unlink(file.path).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      storageMethod: 'google-file-search',
+      fileSearchStoreName,
+      files: uploadResults
+    });
+  } catch (error) {
+    // Clean up any remaining local files
+    await Promise.all(req.files.map(file => fs.unlink(file.path).catch(() => {})));
+    throw error;
+  }
+}));
+
+/**
+ * @route POST /api/files/file-search/query
+ * @desc Query File Search store with a question
+ * @access Authenticated
+ */
+router.post('/file-search/query', asyncHandler(async (req, res) => {
+  const { userId, query, model = 'gemini-2.5-flash' } = req.body;
+
+  if (!userId || !query) {
+    return res.status(400).json({
+      success: false,
+      error: { message: 'userId and query are required' }
+    });
+  }
+
+  try {
+    // Import User model
+    const User = (await import('../models/User.js')).default;
+    const user = await User.findOne({ _id: userId });
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: { message: 'User not found' }
+      });
+    }
+
+    // Check if user has File Search enabled
+    if (!user.preferences?.useFileSearchApi) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'File Search API is not enabled for this user' }
+      });
+    }
+
+    const fileSearchStoreName = user.preferences.fileSearchStoreName;
+    
+    if (!fileSearchStoreName) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'No File Search store found for this user. Please upload files first.' }
+      });
+    }
+
+    // Query File Search store
+    const result = await ProviderManager.generateContentWithFileSearch({
+      model,
+      contents: query,
+      fileSearchStoreNames: [fileSearchStoreName],
+      config: {
+        systemInstruction: user.preferences?.customSystemInstructions || undefined
+      },
+      provider: 'google'
+    });
+
+    res.json({
+      success: true,
+      text: result.text,
+      citations: result.citations || [],
+      model,
+      usageMetadata: result.usageMetadata
+    });
+  } catch (error) {
+    throw error;
+  }
+}));
+
+/**
+ * @route GET /api/files/file-search/store
+ * @desc Get user's File Search store information
+ * @access Authenticated
+ */
+router.get('/file-search/store', asyncHandler(async (req, res) => {
+  const { userId } = req.query;
+
+  if (!userId) {
+    return res.status(400).json({
+      success: false,
+      error: { message: 'userId is required' }
+    });
+  }
+
+  try {
+    // Import User model
+    const User = (await import('../models/User.js')).default;
+    const user = await User.findOne({ _id: userId });
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: { message: 'User not found' }
+      });
+    }
+
+    const fileSearchStoreName = user.preferences.fileSearchStoreName;
+    
+    if (!fileSearchStoreName) {
+      return res.json({
+        success: true,
+        hasStore: false,
+        useFileSearchApi: user.preferences?.useFileSearchApi || false
+      });
+    }
+
+    // Get store details
+    const storeResult = await ProviderManager.getFileSearchStore(fileSearchStoreName, 'google');
+
+    res.json({
+      success: true,
+      hasStore: true,
+      useFileSearchApi: user.preferences?.useFileSearchApi || false,
+      store: {
+        name: storeResult.store.name,
+        displayName: storeResult.store.displayName,
+        createTime: storeResult.store.createTime,
+        updateTime: storeResult.store.updateTime
+      }
+    });
+  } catch (error) {
+    throw error;
+  }
+}));
+
 // Helper function to determine file type
 function getFileType(mimeType) {
   if (mimeType.startsWith('image/')) return 'image';
@@ -1125,4 +1420,4 @@ function getFileType(mimeType) {
   return 'other';
 }
 
-export default router; 
+export default router;
