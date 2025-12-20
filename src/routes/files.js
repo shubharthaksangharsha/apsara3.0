@@ -1278,7 +1278,9 @@ router.post('/file-search/upload', fileUploadRateLimiter, (req, res, next) => {
         size: file.size,
         mimeType: file.mimetype,
         storageMethod: 'google-file-search',
+        url: uploadResult.uri,  // Add url field for Android compatibility
         uri: uploadResult.uri,
+        expiresAt: null,  // File Search stores files indefinitely
         importStatus: operation?.done ? 'completed' : (pollCount >= maxPolls ? 'timeout' : 'pending')
       });
 
