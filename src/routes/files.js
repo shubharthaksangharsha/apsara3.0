@@ -1226,13 +1226,24 @@ router.post('/file-search/upload', fileUploadRateLimiter, (req, res, next) => {
 
       // Poll operation status (simplified - in production use webhooks or async jobs)
       let operation = importOperation.operation;
+      const operationName = importOperation.operationName || operation?.name;
       let pollCount = 0;
       const maxPolls = 20; // Max 20 seconds
       
-      while (!operation.done && pollCount < maxPolls) {
+      if (!operationName) {
+        console.warn('⚠️ No operation name found for import operation:', importOperation);
+      }
+      
+      while (operationName && !operation?.done && pollCount < maxPolls) {
         await new Promise(resolve => setTimeout(resolve, 1000));
-        const opResult = await ProviderManager.getOperation(operation.name, 'google');
-        operation = opResult.operation;
+        try {
+          const opResult = await ProviderManager.getOperation(operationName, 'google');
+          operation = opResult.operation;
+          console.log(`📊 Operation poll ${pollCount + 1}/${maxPolls}: ${operation?.done ? 'DONE' : 'IN PROGRESS'}`);
+        } catch (pollError) {
+          console.error(`❌ Error polling operation status (attempt ${pollCount + 1}):`, pollError.message);
+          break; // Stop polling on error
+        }
         pollCount++;
       }
 
@@ -1268,7 +1279,7 @@ router.post('/file-search/upload', fileUploadRateLimiter, (req, res, next) => {
         mimeType: file.mimetype,
         storageMethod: 'google-file-search',
         uri: uploadResult.uri,
-        importStatus: operation.done ? 'completed' : 'pending'
+        importStatus: operation?.done ? 'completed' : (pollCount >= maxPolls ? 'timeout' : 'pending')
       });
 
       // Clean up local temp file
