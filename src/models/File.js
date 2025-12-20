@@ -36,7 +36,7 @@ const fileSchema = new mongoose.Schema({
   storage: {
     provider: {
       type: String,
-      enum: ['local', 's3', 'google-file-api'],
+      enum: ['local', 's3', 'google-file-api', 'google-file-search'],
       default: 'local'
     },
     path: {
@@ -48,6 +48,10 @@ const fileSchema = new mongoose.Schema({
       required: false
     },
     url: {
+      type: String,
+      required: false
+    },
+    fileSearchStoreName: {
       type: String,
       required: false
     },
@@ -102,7 +106,7 @@ fileSchema.index({ 'storage.expiresAt': 1 }, { expireAfterSeconds: 0 });
 fileSchema.methods.getAccessUrl = function() {
   if (this.storage.provider === 's3' && this.storage.url) {
     return this.storage.url;
-  } else if (this.storage.provider === 'google-file-api' && this.aiProviderFile.fileUri) {
+  } else if ((this.storage.provider === 'google-file-api' || this.storage.provider === 'google-file-search') && this.aiProviderFile?.fileUri) {
     return this.aiProviderFile.fileUri;
   } else {
     return `/api/files/${this.fileId}/download`;

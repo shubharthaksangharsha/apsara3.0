@@ -1226,18 +1226,18 @@ router.post('/file-search/upload', fileUploadRateLimiter, (req, res, next) => {
 
       // Poll operation status (simplified - in production use webhooks or async jobs)
       let operation = importOperation.operation;
-      const operationName = importOperation.operationName || operation?.name;
       let pollCount = 0;
       const maxPolls = 20; // Max 20 seconds
       
-      if (!operationName) {
-        console.warn('⚠️ No operation name found for import operation:', importOperation);
+      if (!operation) {
+        console.warn('⚠️ No operation returned from import:', importOperation);
       }
       
-      while (operationName && !operation?.done && pollCount < maxPolls) {
+      while (operation && !operation?.done && pollCount < maxPolls) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         try {
-          const opResult = await ProviderManager.getOperation(operationName, 'google');
+          // Pass the entire operation object to getOperation
+          const opResult = await ProviderManager.getOperation({ operation: operation }, 'google');
           operation = opResult.operation;
           console.log(`📊 Operation poll ${pollCount + 1}/${maxPolls}: ${operation?.done ? 'DONE' : 'IN PROGRESS'}`);
         } catch (pollError) {
