@@ -353,6 +353,8 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
 
   // Log the userId being used for AI generation
   console.log(`🤖 AI Generate - Using userId from request body: ${userId}`);
+  console.log(`🔄 AI Generate - Stream parameter: ${stream}`);
+  console.log(`📋 AI Generate - Full request body:`, JSON.stringify(req.body, null, 2));
 
   try {
     // Verify conversation exists
