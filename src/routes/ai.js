@@ -650,7 +650,10 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
     }
 
     // Handle streaming vs non-streaming generation
+    console.log(`📡 Stream check - stream value: ${stream}, type: ${typeof stream}, truthy: ${!!stream}`);
+    
     if (stream) {
+      console.log(`🌊 ENTERING STREAMING MODE - SSE will be used`);
       // Set up Server-Sent Events headers
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
