@@ -622,8 +622,7 @@ export class GoogleProvider extends BaseProvider {
 
   /**
    * List documents in a File Search store
-   * Note: The Gemini SDK doesn't have a direct method to list documents in a File Search store
-   * We use the Files API to list all files, which includes files uploaded to File Search
+   * Uses the File Search Documents API to list all documents in the store
    */
   async listFileSearchDocuments(params) {
     this.validateInitialization();
@@ -631,22 +630,23 @@ export class GoogleProvider extends BaseProvider {
     const { fileSearchStoreName } = params;
 
     try {
-      // List all files using the Files API
-      const filesIterator = this.client.files.list();
+      // Use the File Search Documents API
+      const documentsIterator = this.client.fileSearchDocuments.list({
+        parent: fileSearchStoreName
+      });
 
       const documents = [];
-      for await (const file of filesIterator) {
-        // Filter files that belong to this File Search store if needed
-        // For now, we'll return all files as they're all indexed in File Search
+      for await (const doc of documentsIterator) {
         documents.push({
-          name: file.name,
-          displayName: file.displayName || file.name,
-          createTime: file.createTime,
-          updateTime: file.updateTime,
-          size: file.sizeBytes || 0,
-          mimeType: file.mimeType || 'application/octet-stream',
-          uri: file.uri || '',
-          state: file.state || 'ACTIVE'
+          name: doc.name,
+          displayName: doc.displayName || doc.name,
+          createTime: doc.createTime,
+          updateTime: doc.updateTime,
+          size: doc.sizeBytes || 0,
+          mimeType: doc.mimeType || 'application/octet-stream',
+          uri: doc.uri || '',
+          state: doc.state || 'ACTIVE',
+          metadata: doc.customMetadata || []
         });
       }
 
@@ -663,7 +663,7 @@ export class GoogleProvider extends BaseProvider {
 
   /**
    * Delete a document from a File Search store
-   * Note: We use the Files API to delete files
+   * Uses the File Search Documents API to delete a specific document
    */
   async deleteFileSearchDocument(params) {
     this.validateInitialization();
@@ -671,13 +671,15 @@ export class GoogleProvider extends BaseProvider {
     const { fileSearchStoreName, documentId } = params;
 
     try {
-      // The documentId should be the file name (e.g., "files/abc123")
-      // If it doesn't start with "files/", prepend it
-      const fileName = documentId.startsWith('files/') 
+      // The documentId should be in the format "fileSearchStores/{store}/documents/{doc}"
+      // If it's just the document name, construct the full path
+      const documentName = documentId.includes('/documents/') 
         ? documentId 
-        : `files/${documentId}`;
+        : `${fileSearchStoreName}/documents/${documentId}`;
 
-      await this.client.files.delete({ name: fileName });
+      await this.client.fileSearchDocuments.delete({
+        name: documentName
+      });
 
       return {
         success: true,
