@@ -345,6 +345,33 @@ export class ProviderManager {
   }
 
   /**
+   * List documents in a File Search store
+   * @param {Object} params - List parameters
+   * @param {string} params.fileSearchStoreName - Store name
+   * @param {string} params.provider - Provider name (optional)
+   * @returns {Promise<Object>} List of documents
+   */
+  async listFileSearchDocuments(params) {
+    const { provider: providerName, ...restParams } = params;
+    const provider = this.getProvider(providerName);
+    return await provider.listFileSearchDocuments(restParams);
+  }
+
+  /**
+   * Delete a document from a File Search store
+   * @param {Object} params - Delete parameters
+   * @param {string} params.fileSearchStoreName - Store name
+   * @param {string} params.documentId - Document ID to delete
+   * @param {string} params.provider - Provider name (optional)
+   * @returns {Promise<void>}
+   */
+  async deleteFileSearchDocument(params) {
+    const { provider: providerName, ...restParams } = params;
+    const provider = this.getProvider(providerName);
+    return await provider.deleteFileSearchDocument(restParams);
+  }
+
+  /**
    * Get capabilities for all providers
    * @returns {Object} Capabilities by provider
    */

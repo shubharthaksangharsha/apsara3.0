@@ -1492,6 +1492,96 @@ router.delete('/file-search/reset', authMiddleware, asyncHandler(async (req, res
   }
 }));
 
+/**
+ * @route GET /api/files/file-search/documents
+ * @desc List all documents in user's File Search store
+ * @access Authenticated
+ */
+router.get('/file-search/documents', authMiddleware, asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const fileSearchStoreName = user.preferences?.fileSearchStoreName;
+    
+    if (!fileSearchStoreName) {
+      return res.json({
+        success: true,
+        documents: [],
+        hasStore: false
+      });
+    }
+
+    // List documents in the File Search store
+    const documents = await ProviderManager.listFileSearchDocuments({
+      fileSearchStoreName,
+      provider: 'google'
+    });
+
+    res.json({
+      success: true,
+      documents: documents.documents || [],
+      hasStore: true,
+      storeName: fileSearchStoreName
+    });
+  } catch (error) {
+    throw error;
+  }
+}));
+
+/**
+ * @route DELETE /api/files/file-search/documents/:documentId
+ * @desc Delete a specific document from File Search store
+ * @access Authenticated
+ */
+router.delete('/file-search/documents/:documentId', authMiddleware, asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { documentId } = req.params;
+    
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const fileSearchStoreName = user.preferences?.fileSearchStoreName;
+    
+    if (!fileSearchStoreName) {
+      return res.status(404).json({
+        success: false,
+        error: 'No File Search store found for this user'
+      });
+    }
+
+    // Delete the document from File Search store
+    await ProviderManager.deleteFileSearchDocument({
+      fileSearchStoreName,
+      documentId,
+      provider: 'google'
+    });
+
+    console.log(`🗑️ Document ${documentId} deleted from File Search store for user ${userId}`);
+
+    res.json({
+      success: true,
+      message: 'Document deleted successfully'
+    });
+  } catch (error) {
+    throw error;
+  }
+}));
+
 // Helper function to determine file type
 function getFileType(mimeType) {
   if (mimeType.startsWith('image/')) return 'image';

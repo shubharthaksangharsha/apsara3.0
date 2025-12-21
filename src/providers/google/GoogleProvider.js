@@ -621,6 +621,71 @@ export class GoogleProvider extends BaseProvider {
   }
 
   /**
+   * List documents in a File Search store
+   */
+  async listFileSearchDocuments(params) {
+    this.validateInitialization();
+
+    const { fileSearchStoreName } = params;
+
+    try {
+      const documentsIterator = await this.client.fileSearchStores.listDocuments({
+        fileSearchStoreName
+      });
+
+      const documents = [];
+      for await (const doc of documentsIterator) {
+        documents.push({
+          name: doc.name,
+          displayName: doc.displayName,
+          createTime: doc.createTime,
+          updateTime: doc.updateTime,
+          customMetadata: doc.customMetadata || [],
+          size: doc.sizeBytes || 0
+        });
+      }
+
+      return {
+        success: true,
+        provider: this.name,
+        documents
+      };
+    } catch (error) {
+      console.error('Google List File Search Documents Error:', error);
+      throw this.createProviderError(error);
+    }
+  }
+
+  /**
+   * Delete a document from a File Search store
+   */
+  async deleteFileSearchDocument(params) {
+    this.validateInitialization();
+
+    const { fileSearchStoreName, documentId } = params;
+
+    try {
+      // Construct the full document name
+      const documentName = documentId.startsWith(fileSearchStoreName) 
+        ? documentId 
+        : `${fileSearchStoreName}/documents/${documentId}`;
+
+      await this.client.fileSearchStores.deleteDocument({
+        name: documentName
+      });
+
+      return {
+        success: true,
+        provider: this.name,
+        message: 'Document deleted successfully'
+      };
+    } catch (error) {
+      console.error('Google Delete File Search Document Error:', error);
+      throw this.createProviderError(error);
+    }
+  }
+
+  /**
    * Create ephemeral tokens
    */
   async createEphemeralToken(config) {
