@@ -701,8 +701,6 @@ export class GoogleProvider extends BaseProvider {
       throw this.createProviderError(error);
     }
   }
-    }
-  }
 
   /**
    * Create ephemeral tokens
