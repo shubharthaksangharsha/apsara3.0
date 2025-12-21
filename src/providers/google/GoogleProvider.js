@@ -622,7 +622,8 @@ export class GoogleProvider extends BaseProvider {
 
   /**
    * List documents in a File Search store
-   * Uses the File Search Documents API to list all documents in the store
+   * Uses the Files API to list all files uploaded by the user
+   * Note: Files uploaded to File Search stores are still accessible via the Files API
    */
   async listFileSearchDocuments(params) {
     this.validateInitialization();
@@ -630,23 +631,22 @@ export class GoogleProvider extends BaseProvider {
     const { fileSearchStoreName } = params;
 
     try {
-      // Use the File Search Documents API
-      const documentsIterator = this.client.fileSearchDocuments.list({
-        parent: fileSearchStoreName
-      });
+      // Use the Files API to list all files
+      // Files uploaded to File Search stores remain in the Files API
+      const files = await this.client.files.list();
 
       const documents = [];
-      for await (const doc of documentsIterator) {
+      for await (const file of files) {
         documents.push({
-          name: doc.name,
-          displayName: doc.displayName || doc.name,
-          createTime: doc.createTime,
-          updateTime: doc.updateTime,
-          size: doc.sizeBytes || 0,
-          mimeType: doc.mimeType || 'application/octet-stream',
-          uri: doc.uri || '',
-          state: doc.state || 'ACTIVE',
-          metadata: doc.customMetadata || []
+          name: file.name, // "files/abc-123"
+          displayName: file.displayName || file.name,
+          createTime: file.createTime,
+          updateTime: file.updateTime,
+          size: file.sizeBytes || 0,
+          mimeType: file.mimeType || 'application/octet-stream',
+          uri: file.uri || '',
+          state: file.state || 'ACTIVE',
+          metadata: file.metadata || {}
         });
       }
 
@@ -663,7 +663,8 @@ export class GoogleProvider extends BaseProvider {
 
   /**
    * Delete a document from a File Search store
-   * Uses the File Search Documents API to delete a specific document
+   * Uses the Files API to delete a file
+   * Note: The file name should be in format "files/abc-123"
    */
   async deleteFileSearchDocument(params) {
     this.validateInitialization();
@@ -671,14 +672,14 @@ export class GoogleProvider extends BaseProvider {
     const { fileSearchStoreName, documentId } = params;
 
     try {
-      // The documentId should be in the format "fileSearchStores/{store}/documents/{doc}"
-      // If it's just the document name, construct the full path
-      const documentName = documentId.includes('/documents/') 
+      // The documentId is the file name in format "files/abc-123"
+      // If it doesn't include "files/", add it
+      const fileName = documentId.startsWith('files/') 
         ? documentId 
-        : `${fileSearchStoreName}/documents/${documentId}`;
+        : `files/${documentId}`;
 
-      await this.client.fileSearchDocuments.delete({
-        name: documentName
+      await this.client.files.delete({
+        name: fileName
       });
 
       return {
