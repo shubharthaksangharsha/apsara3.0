@@ -684,9 +684,12 @@ export class GoogleProvider extends BaseProvider {
 
       console.log(`🗑️ Deleting document: ${documentName}`);
 
-      // Delete the document using the fileSearchStores.documents API
+      // Delete the document using the fileSearchStores.documents API with force option
       await this.client.fileSearchStores.documents.delete({
-        name: documentName
+        name: documentName,
+        config: {
+          force: true // Force delete even if document has chunks
+        }
       });
 
       console.log(`✅ Document ${documentName} deleted from File Search store`);
