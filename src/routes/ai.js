@@ -633,6 +633,17 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
         generationConfig.tools = [fileSearchTool];
       }
       
+      // Add a hint to the system instruction so AI knows it can search user's documents
+      const fileSearchHint = "\n\nIMPORTANT: You have access to a file search tool that contains all documents the user has previously uploaded. When the user asks about their files, documents, or any previously shared information (like boarding passes, invoices, receipts, etc.), USE THE FILE SEARCH TOOL to retrieve and reference that information. You don't need the user to re-upload files - just search for them using the file_search tool.";
+      
+      if (generationConfig.systemInstruction) {
+        generationConfig.systemInstruction += fileSearchHint;
+      } else if (user.preferences?.customSystemInstructions) {
+        generationConfig.systemInstruction = user.preferences.customSystemInstructions + fileSearchHint;
+      } else {
+        generationConfig.systemInstruction = fileSearchHint.trim();
+      }
+      
       console.log(`🔍 File Search tool added for user ${userId} with store: ${user.preferences.fileSearchStoreName}`);
     }
 
