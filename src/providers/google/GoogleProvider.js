@@ -622,8 +622,8 @@ export class GoogleProvider extends BaseProvider {
 
   /**
    * List documents in a File Search store
-   * Uses the File Search Documents API to list documents in the store
-   * This is the correct API to use for File Search stores
+   * Uses the Documents API (v1.34.0+) to list documents in the store
+   * API: client.documents.list({ parent: fileSearchStoreName })
    */
   async listFileSearchDocuments(params) {
     this.validateInitialization();
@@ -631,9 +631,9 @@ export class GoogleProvider extends BaseProvider {
     const { fileSearchStoreName } = params;
 
     try {
-      // Use the File Search Documents API to list documents in the store
+      // Use the Documents API to list documents in the store
       const documents = [];
-      const documentsIterator = this.client.fileSearchStores.listDocuments({
+      const documentsIterator = this.client.documents.list({
         parent: fileSearchStoreName
       });
 
@@ -666,8 +666,8 @@ export class GoogleProvider extends BaseProvider {
 
   /**
    * Delete a document from a File Search store
-   * Uses the File Search Documents API to delete a document
-   * This actually removes the document from the File Search store (not just the file reference)
+   * Uses the Documents API (v1.34.0+) to delete a document
+   * API: client.documents.delete({ name: documentName })
    */
   async deleteFileSearchDocument(params) {
     this.validateInitialization();
@@ -675,16 +675,17 @@ export class GoogleProvider extends BaseProvider {
     const { fileSearchStoreName, documentId } = params;
 
     try {
-      // The documentId should be the full document name: "fileSearchStores/{store}/documents/{doc}"
-      // If it's just the doc ID, construct the full name
+      // The documentId can be:
+      // 1. Full document name: "fileSearchStores/{store}/documents/{doc}"
+      // 2. Just the document ID: need to construct full name
       const documentName = documentId.includes('fileSearchStores/') 
         ? documentId
         : `${fileSearchStoreName}/documents/${documentId}`;
 
-      console.log(`🗑️ Deleting document from File Search store: ${documentName}`);
+      console.log(`🗑️ Deleting document: ${documentName}`);
 
-      // Delete the document from the File Search store
-      await this.client.fileSearchStores.deleteDocument({
+      // Delete the document using the Documents API
+      await this.client.documents.delete({
         name: documentName
       });
 
@@ -698,6 +699,8 @@ export class GoogleProvider extends BaseProvider {
     } catch (error) {
       console.error('Google Delete File Search Document Error:', error);
       throw this.createProviderError(error);
+    }
+  }
     }
   }
 
