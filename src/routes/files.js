@@ -1544,7 +1544,8 @@ router.get('/file-search/documents', authMiddleware, asyncHandler(async (req, re
 router.delete('/file-search/documents/:documentId', authMiddleware, asyncHandler(async (req, res) => {
   try {
     const userId = req.user.id;
-    const { documentId } = req.params;
+    // URL-decode the document ID since it may contain encoded slashes
+    const documentId = decodeURIComponent(req.params.documentId);
     
     const user = await User.findById(userId);
 
