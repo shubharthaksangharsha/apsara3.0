@@ -622,8 +622,8 @@ export class GoogleProvider extends BaseProvider {
 
   /**
    * List documents in a File Search store
-   * Uses the Documents API (v1.34.0+)
-   * API: client.documents.list({ parent: fileSearchStoreName })
+   * Uses the fileSearchStores.documents API (v1.34.0+)
+   * API: client.fileSearchStores.documents.list({ parent: fileSearchStoreName })
    */
   async listFileSearchDocuments(params) {
     this.validateInitialization();
@@ -631,9 +631,9 @@ export class GoogleProvider extends BaseProvider {
     const { fileSearchStoreName } = params;
 
     try {
-      // Use the Documents API to list documents in the store
+      // Use the fileSearchStores.documents API to list documents in the store
       const documents = [];
-      const documentsIterator = await this.client.documents.list({
+      const documentsIterator = await this.client.fileSearchStores.documents.list({
         parent: fileSearchStoreName
       });
 
