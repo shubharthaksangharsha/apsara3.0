@@ -969,10 +969,6 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
     });
   }
 }));
-      details: error.message
-    });
-  }
-}));
 
 /**
  * @route POST /api/ai/embeddings
