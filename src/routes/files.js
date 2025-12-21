@@ -7,8 +7,44 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { fileUploadRateLimiter, getFileUploadLimitInfo } from '../middleware/rateLimiter.js';
 import ProviderManager from '../providers/ProviderManager.js';
 import File from '../models/File.js';
+import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
 
 const router = express.Router();
+
+// Auth middleware for protected routes
+const authMiddleware = async (req, res, next) => {
+  try {
+    const authHeader = req.header('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Access denied. No token provided.' 
+      });
+    }
+
+    const token = authHeader.substring(7);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default-secret-key');
+    
+    const tokenUserId = decoded.id || decoded.userId;
+    
+    const user = await User.findById(tokenUserId);
+    if (!user) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid token. User not found.' 
+      });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    res.status(401).json({ 
+      success: false, 
+      message: 'Invalid token.' 
+    });
+  }
+};
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -1418,6 +1454,38 @@ router.get('/file-search/store', asyncHandler(async (req, res) => {
         createTime: storeResult.store.createTime,
         updateTime: storeResult.store.updateTime
       }
+    });
+  } catch (error) {
+    throw error;
+  }
+}));
+
+// Reset File Search store - clears the stored File Search store name
+router.delete('/file-search/reset', authMiddleware, asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    const previousStore = user.preferences?.fileSearchStoreName;
+    
+    // Clear File Search settings
+    user.preferences.fileSearchStoreName = null;
+    user.preferences.useFileSearchApi = false;
+    await user.save();
+
+    console.log(`🗑️ File Search store reset for user ${userId}. Previous store: ${previousStore}`);
+
+    res.json({
+      success: true,
+      message: 'File Search store reset successfully',
+      previousStore: previousStore
     });
   } catch (error) {
     throw error;

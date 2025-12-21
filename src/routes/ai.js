@@ -637,12 +637,41 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
     }
 
     // Generate response
-    const aiResponse = await ProviderManager.generateContent({
-      provider,
-      contents: messages,
-      config: generationConfig,
-      stream
-    });
+    let aiResponse;
+    try {
+      aiResponse = await ProviderManager.generateContent({
+        provider,
+        contents: messages,
+        config: generationConfig,
+        stream
+      });
+    } catch (genError) {
+      // Check if it's a File Search permission error
+      if (genError.message?.includes('PERMISSION_DENIED') && 
+          genError.message?.includes('fileSearch') &&
+          user.preferences?.fileSearchStoreName) {
+        console.warn(`⚠️ File Search store permission denied. Clearing invalid store: ${user.preferences.fileSearchStoreName}`);
+        
+        // Clear the invalid File Search store name
+        user.preferences.fileSearchStoreName = null;
+        user.preferences.useFileSearchApi = false;
+        await user.save();
+        
+        // Retry without File Search
+        console.log('🔄 Retrying generation without File Search...');
+        const toolsWithoutFileSearch = generationConfig.tools?.filter(tool => !tool.fileSearch);
+        generationConfig.tools = toolsWithoutFileSearch?.length > 0 ? toolsWithoutFileSearch : undefined;
+        
+        aiResponse = await ProviderManager.generateContent({
+          provider,
+          contents: messages,
+          config: generationConfig,
+          stream
+        });
+      } else {
+        throw genError; // Re-throw if not a File Search error
+      }
+    }
 
     if (!aiResponse.success) {
       return res.status(500).json({
