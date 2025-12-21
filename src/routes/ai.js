@@ -647,14 +647,173 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
       console.log(`🔍 File Search tool added for user ${userId} with store: ${user.preferences.fileSearchStoreName}`);
     }
 
-    // Generate response
+    // Handle streaming vs non-streaming generation
+    if (stream) {
+      // Set up Server-Sent Events headers
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+
+      // Create model response message placeholder
+      const modelMessageSequence = conversation.getNextMessageSequence();
+      await conversation.save();
+      const modelMessageId = uuidv4();
+
+      // Send initial metadata
+      res.write(`data: ${JSON.stringify({
+        type: 'start',
+        conversationId,
+        userMessage: {
+          messageId: userMessageId,
+          messageSequence,
+          content: userMessage.content.text
+        },
+        modelMessage: {
+          messageId: modelMessageId,
+          messageSequence: modelMessageSequence
+        },
+        metadata: {
+          provider,
+          model,
+          conversationHistory: {
+            included: true,
+            messageCount: conversationHistory.length
+          }
+        }
+      })}\n\n`);
+
+      // Stream the AI response
+      try {
+        let fullText = '';
+        let fullThoughts = '';
+        let usageMetadata = null;
+        let finishReason = null;
+        
+        const streamGenerator = ProviderManager.generateContentStream({
+          provider,
+          contents: messages,
+          config: generationConfig
+        });
+
+        for await (const chunk of streamGenerator) {
+          if (chunk.success) {
+            fullText += chunk.text || '';
+            fullThoughts += chunk.thought || '';
+            
+            // Update metadata if available
+            if (chunk.usageMetadata) {
+              usageMetadata = chunk.usageMetadata;
+            }
+            if (chunk.finishReason) {
+              finishReason = chunk.finishReason;
+            }
+            
+            // Send chunk to client
+            res.write(`data: ${JSON.stringify({
+              type: 'chunk',
+              text: chunk.text || '',
+              thought: chunk.thought || null,
+              isThinking: chunk.isThinking || false,
+              hasThoughtSignatures: chunk.hasThoughtSignatures || false,
+              isEndChunk: chunk.isEndChunk || false
+            })}\n\n`);
+          }
+        }
+
+        // Create and save the model message with final content
+        const modelMessage = new Message({
+          messageId: modelMessageId,
+          conversationId,
+          userId,
+          messageSequence: modelMessageSequence,
+          messageType: 'rest',
+          role: 'model',
+          content: {
+            text: fullText,
+            thoughts: fullThoughts || undefined
+          },
+          config: {
+            rest: generationConfig
+          },
+          status: 'completed',
+          metadata: {
+            timing: {
+              requestTime: userMessage.metadata.timing.requestTime,
+              responseTime: new Date()
+            },
+            tokens: {
+              input: usageMetadata?.promptTokenCount || 0,
+              output: usageMetadata?.candidatesTokenCount || 0,
+              total: usageMetadata?.totalTokenCount || 0
+            },
+            provider: {
+              name: provider,
+              model
+            }
+          }
+        });
+
+        await modelMessage.save();
+
+        // Update user message with token information
+        userMessage.metadata.tokens = {
+          input: usageMetadata?.promptTokenCount || 0,
+          output: 0,
+          total: usageMetadata?.promptTokenCount || 0
+        };
+        await userMessage.save();
+
+        // Record usage for rate limiting
+        await userUsage.recordUsage(model, usageMetadata?.totalTokenCount || 0);
+
+        // Update conversation stats
+        await conversation.incrementStats('rest', usageMetadata?.totalTokenCount || 0);
+
+        // Send completion event with final metadata
+        res.write(`data: ${JSON.stringify({
+          type: 'done',
+          modelMessage: {
+            messageId: modelMessageId,
+            content: fullText,
+            thoughts: fullThoughts || undefined
+          },
+          usageMetadata: {
+            promptTokenCount: usageMetadata?.promptTokenCount || 0,
+            candidatesTokenCount: usageMetadata?.candidatesTokenCount || 0,
+            totalTokenCount: usageMetadata?.totalTokenCount || 0
+          },
+          conversationStats: {
+            totalMessages: conversation.stats.totalMessages,
+            totalTokens: conversation.stats.totalTokens
+          },
+          timing: {
+            requestTime: userMessage.metadata.timing.requestTime,
+            responseTime: modelMessage.metadata.timing.responseTime,
+            processingDuration: modelMessage.metadata.timing.responseTime - userMessage.metadata.timing.requestTime
+          }
+        })}\n\n`);
+
+        res.end();
+      } catch (streamError) {
+        console.error('Streaming Error:', streamError);
+        res.write(`data: ${JSON.stringify({
+          type: 'error',
+          error: 'Streaming failed',
+          details: streamError.message
+        })}\n\n`);
+        res.end();
+      }
+      return; // Exit early for streaming
+    }
+
+    // Non-streaming generation (existing behavior)
     let aiResponse;
     try {
       aiResponse = await ProviderManager.generateContent({
         provider,
         contents: messages,
-        config: generationConfig,
-        stream
+        config: generationConfig
       });
     } catch (genError) {
       // Check if it's a File Search permission error
@@ -676,8 +835,7 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
         aiResponse = await ProviderManager.generateContent({
           provider,
           contents: messages,
-          config: generationConfig,
-          stream
+          config: generationConfig
         });
       } else {
         throw genError; // Re-throw if not a File Search error
@@ -799,6 +957,7 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
       }
     };
 
+    // Non-streaming response
     res.json(response);
 
   } catch (error) {
@@ -806,6 +965,10 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Internal server error',
+      details: error.message
+    });
+  }
+}));
       details: error.message
     });
   }
