@@ -617,6 +617,25 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
       generationConfig.tools = config.tools || conversation.config.rest.tools;
     }
 
+    // Add File Search tool if user has it enabled and has a File Search store
+    if (user.preferences?.useFileSearchApi && user.preferences?.fileSearchStoreName) {
+      const fileSearchTool = {
+        fileSearch: {
+          fileSearchStoreNames: [user.preferences.fileSearchStoreName]
+        }
+      };
+      
+      if (generationConfig.tools) {
+        // Add to existing tools
+        generationConfig.tools.push(fileSearchTool);
+      } else {
+        // Create tools array with File Search
+        generationConfig.tools = [fileSearchTool];
+      }
+      
+      console.log(`🔍 File Search tool added for user ${userId} with store: ${user.preferences.fileSearchStoreName}`);
+    }
+
     // Generate response
     const aiResponse = await ProviderManager.generateContent({
       provider,
