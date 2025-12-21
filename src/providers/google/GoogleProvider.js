@@ -622,8 +622,8 @@ export class GoogleProvider extends BaseProvider {
 
   /**
    * List documents in a File Search store
-   * Uses the Documents API (v1.34.0+) to list documents in the store
-   * API: client.documents.list({ parent: fileSearchStoreName })
+   * Uses the fileSearchStores.documents API (v1.34.0+)
+   * API: client.fileSearchStores.documents.list({ parent: fileSearchStoreName })
    */
   async listFileSearchDocuments(params) {
     this.validateInitialization();
@@ -631,9 +631,9 @@ export class GoogleProvider extends BaseProvider {
     const { fileSearchStoreName } = params;
 
     try {
-      // Use the Documents API to list documents in the store
+      // Use the fileSearchStores.documents API to list documents in the store
       const documents = [];
-      const documentsIterator = this.client.documents.list({
+      const documentsIterator = this.client.fileSearchStores.documents.list({
         parent: fileSearchStoreName
       });
 
@@ -666,8 +666,8 @@ export class GoogleProvider extends BaseProvider {
 
   /**
    * Delete a document from a File Search store
-   * Uses the Documents API (v1.34.0+) to delete a document
-   * API: client.documents.delete({ name: documentName })
+   * Uses the fileSearchStores.documents API (v1.34.0+)
+   * API: client.fileSearchStores.documents.delete({ name: documentName })
    */
   async deleteFileSearchDocument(params) {
     this.validateInitialization();
@@ -684,8 +684,8 @@ export class GoogleProvider extends BaseProvider {
 
       console.log(`🗑️ Deleting document: ${documentName}`);
 
-      // Delete the document using the Documents API
-      await this.client.documents.delete({
+      // Delete the document using the fileSearchStores.documents API
+      await this.client.fileSearchStores.documents.delete({
         name: documentName
       });
 
