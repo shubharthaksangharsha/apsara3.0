@@ -654,11 +654,21 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
     
     if (stream) {
       console.log(`🌊 ENTERING STREAMING MODE - SSE will be used`);
-      // Set up Server-Sent Events headers
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
+      // Set up Server-Sent Events headers for IMMEDIATE unbuffered streaming
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-store, no-transform, must-revalidate');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+      res.setHeader('Transfer-Encoding', 'chunked'); // Force chunked encoding
+      
+      // Send an initial comment to establish the connection immediately
+      res.write(':ping\n\n');
+      res.flushHeaders(); // Send headers immediately
+      
+      // CRITICAL: Force flush after initial ping
+      if (typeof res.flush === 'function') {
+        res.flush();
+      }
 
       // Create model response message placeholder
       const modelMessageSequence = conversation.getNextMessageSequence();
@@ -687,6 +697,11 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
           }
         }
       })}\n\n`);
+      
+      // CRITICAL: Flush immediately to send to client!
+      if (typeof res.flush === 'function') {
+        res.flush();
+      }
 
       // Stream the AI response
       try {
@@ -715,14 +730,24 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
             }
             
             // Send chunk to client
-            res.write(`data: ${JSON.stringify({
+            const chunkData = {
               type: 'chunk',
               text: chunk.text || '',
               thought: chunk.thought || null,
               isThinking: chunk.isThinking || false,
               hasThoughtSignatures: chunk.hasThoughtSignatures || false,
               isEndChunk: chunk.isEndChunk || false
-            })}\n\n`);
+            };
+            
+            res.write(`data: ${JSON.stringify(chunkData)}\n\n`);
+            
+            // CRITICAL: Flush IMMEDIATELY after EVERY chunk to force network transmission!
+            if (typeof res.flush === 'function') {
+              res.flush();
+            }
+            
+            // Log chunk delivery for debugging
+            console.log(`📤 Flushed chunk - Text: "${(chunk.text || '').substring(0, 30)}..."`);
           }
         }
 
@@ -799,6 +824,11 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
           }
         })}\n\n`);
 
+        // CRITICAL: Flush the final "done" event!
+        if (typeof res.flush === 'function') {
+          res.flush();
+        }
+        
         res.end();
       } catch (streamError) {
         console.error('Streaming Error:', streamError);

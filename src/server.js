@@ -70,7 +70,17 @@ class ApsaraServer {
     }));
 
     // General middleware
-    this.app.use(compression());
+    // Disable compression for Server-Sent Events (SSE) routes to prevent buffering
+    this.app.use(compression({
+      filter: (req, res) => {
+        // Don't compress SSE streams (they need immediate flushing)
+        if (req.headers.accept && req.headers.accept.includes('text/event-stream')) {
+          return false;
+        }
+        // Use default compression filter for other requests
+        return compression.filter(req, res);
+      }
+    }));
     this.app.use(morgan('combined'));
     
     // Increase body size limits to support large file uploads
