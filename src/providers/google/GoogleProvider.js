@@ -622,8 +622,8 @@ export class GoogleProvider extends BaseProvider {
 
   /**
    * List documents in a File Search store
-   * Uses the Files API to list all files uploaded by the user
-   * Note: Files uploaded to File Search stores are still accessible via the Files API
+   * Uses the File Search Documents API to list documents in the store
+   * This is the correct API to use for File Search stores
    */
   async listFileSearchDocuments(params) {
     this.validateInitialization();
@@ -631,24 +631,27 @@ export class GoogleProvider extends BaseProvider {
     const { fileSearchStoreName } = params;
 
     try {
-      // Use the Files API to list all files
-      // Files uploaded to File Search stores remain in the Files API
-      const files = await this.client.files.list();
-
+      // Use the File Search Documents API to list documents in the store
       const documents = [];
-      for await (const file of files) {
+      const documentsIterator = this.client.fileSearchStores.listDocuments({
+        parent: fileSearchStoreName
+      });
+
+      for await (const doc of documentsIterator) {
         documents.push({
-          name: file.name, // "files/abc-123"
-          displayName: file.displayName || file.name,
-          createTime: file.createTime,
-          updateTime: file.updateTime,
-          size: file.sizeBytes || 0,
-          mimeType: file.mimeType || 'application/octet-stream',
-          uri: file.uri || '',
-          state: file.state || 'ACTIVE',
-          metadata: file.metadata || {}
+          name: doc.name, // "fileSearchStores/{store}/documents/{doc}"
+          displayName: doc.displayName || doc.name,
+          createTime: doc.createTime,
+          updateTime: doc.updateTime,
+          size: doc.sizeBytes || 0,
+          mimeType: doc.mimeType || 'application/octet-stream',
+          uri: doc.uri || '',
+          state: doc.state || 'ACTIVE',
+          metadata: doc.metadata || {}
         });
       }
+
+      console.log(`✅ Listed ${documents.length} documents from File Search store: ${fileSearchStoreName}`);
 
       return {
         success: true,
@@ -663,8 +666,8 @@ export class GoogleProvider extends BaseProvider {
 
   /**
    * Delete a document from a File Search store
-   * Uses the Files API to delete a file
-   * Note: The file name should be in format "files/abc-123"
+   * Uses the File Search Documents API to delete a document
+   * This actually removes the document from the File Search store (not just the file reference)
    */
   async deleteFileSearchDocument(params) {
     this.validateInitialization();
@@ -672,20 +675,25 @@ export class GoogleProvider extends BaseProvider {
     const { fileSearchStoreName, documentId } = params;
 
     try {
-      // The documentId is the file name in format "files/abc-123"
-      // If it doesn't include "files/", add it
-      const fileName = documentId.startsWith('files/') 
-        ? documentId 
-        : `files/${documentId}`;
+      // The documentId should be the full document name: "fileSearchStores/{store}/documents/{doc}"
+      // If it's just the doc ID, construct the full name
+      const documentName = documentId.includes('fileSearchStores/') 
+        ? documentId
+        : `${fileSearchStoreName}/documents/${documentId}`;
 
-      await this.client.files.delete({
-        name: fileName
+      console.log(`🗑️ Deleting document from File Search store: ${documentName}`);
+
+      // Delete the document from the File Search store
+      await this.client.fileSearchStores.deleteDocument({
+        name: documentName
       });
+
+      console.log(`✅ Document ${documentName} deleted from File Search store`);
 
       return {
         success: true,
         provider: this.name,
-        message: 'Document deleted successfully'
+        message: 'Document deleted successfully from File Search store'
       };
     } catch (error) {
       console.error('Google Delete File Search Document Error:', error);
