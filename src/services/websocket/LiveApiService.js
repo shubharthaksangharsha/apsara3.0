@@ -493,41 +493,70 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
     const session = client.session;
     const sc = response.serverContent;
+    
+    // Track what we've handled in this message
+    let messageHandled = false;
 
     // Priority 0: Tool calls (function calling) - handle immediately
     if (response.toolCall) {
-      console.log('[LiveAPI] Tool call received:', JSON.stringify(response.toolCall, null, 2));
+      console.log('[LiveAPI] 🔧 Tool call received:', JSON.stringify(response.toolCall, null, 2));
+      messageHandled = true;
       await this.handleToolCall(clientId, sessionId, response.toolCall);
     }
 
     // Priority 1: Audio data - send immediately for lowest latency
     if (response.data) {
+      messageHandled = true;
       this.sendToClient(clientId, { type: 'audio_data', sessionId, data: response.data });
     } else if (sc?.modelTurn?.parts?.[0]?.inlineData?.data) {
       const part = sc.modelTurn.parts[0];
       if (part.inlineData.mimeType?.startsWith('audio/')) {
+        messageHandled = true;
         this.sendToClient(clientId, { type: 'audio_data', sessionId, data: part.inlineData.data });
+      }
+    }
+
+    // Handle text and thought parts from model turn (for thinking models)
+    if (sc?.modelTurn?.parts) {
+      for (const part of sc.modelTurn.parts) {
+        // Handle thought parts (thinking process)
+        if (part.thought && part.text) {
+          messageHandled = true;
+          console.log(`[LiveAPI] 🧠 Thought: "${part.text.substring(0, 100)}..."`);
+          // Optionally send to client for debugging
+          // this.sendToClient(clientId, { type: 'model_thought', sessionId, thought: part.text });
+        }
+        // Handle regular text parts (non-audio, non-thought)
+        else if (part.text && !part.inlineData) {
+          messageHandled = true;
+          console.log(`[LiveAPI] 📝 Model text: "${part.text.substring(0, 100)}..."`);
+          // This is usually spoken text that's also in outputTranscription
+        }
       }
     }
 
     // Priority 2: Transcriptions
     if (sc?.inputTranscription?.text) {
+      messageHandled = true;
       session.currentInputTranscription += sc.inputTranscription.text;
       this.sendToClient(clientId, { type: 'input_transcription', sessionId, text: session.currentInputTranscription });
     }
 
     if (sc?.outputTranscription?.text) {
+      messageHandled = true;
       session.currentOutputTranscription += sc.outputTranscription.text;
       this.sendToClient(clientId, { type: 'output_transcription', sessionId, text: session.currentOutputTranscription });
     }
 
     // Priority 3: Turn/Generation events - save async (don't block)
     if (sc?.turnComplete) {
+      messageHandled = true;
       this.saveTurnMessages(clientId, sessionId); // No await - fire and forget
       this.sendToClient(clientId, { type: 'turn_complete', sessionId });
     }
 
     if (sc?.generationComplete) {
+      messageHandled = true;
       if (session.currentOutputTranscription || session.currentInputTranscription) {
         this.saveTurnMessages(clientId, sessionId);
       }
@@ -535,13 +564,34 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     if (sc?.interrupted) {
+      messageHandled = true;
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
       this.sendToClient(clientId, { type: 'interrupted', sessionId });
     }
 
     if (response.goAway) {
+      messageHandled = true;
       this.sendToClient(clientId, { type: 'go_away', sessionId, timeLeft: response.goAway.timeLeft });
+    }
+    
+    // Log unhandled/unknown messages with full structure
+    if (!messageHandled) {
+      console.log('[LiveAPI] ⚠️ UNHANDLED MESSAGE - Full structure:');
+      console.log(JSON.stringify(response, null, 2));
+      
+      // Check for specific patterns that might be causing issues
+      if (sc?.modelTurn?.parts) {
+        console.log('[LiveAPI] Model turn parts found:');
+        sc.modelTurn.parts.forEach((part, idx) => {
+          console.log(`  Part ${idx}:`, Object.keys(part));
+          if (part.text) console.log(`    - text: "${part.text.substring(0, 100)}..."`);
+          if (part.thought) console.log(`    - thought: true`);
+          if (part.thoughtSignature) console.log(`    - thoughtSignature: present`);
+          if (part.executableCode) console.log(`    - executableCode: present`);
+          if (part.codeExecutionResult) console.log(`    - codeExecutionResult: present`);
+        });
+      }
     }
   }
 
