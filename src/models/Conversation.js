@@ -47,9 +47,9 @@ const conversationSchema = new mongoose.Schema({
       },
       maxOutputTokens: {
         type: Number,
-        default: 2048,
+        default: 8192,
         min: 1,
-        max: 8192
+        max: 65536  // Updated to support Gemini 2.5 models
       },
       topP: Number,
       topK: Number,
