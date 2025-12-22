@@ -1,3 +1,4 @@
+
 import { v4 as uuidv4 } from 'uuid';
 import { liveApiRateLimiter, liveApiUserRateLimiter, getLiveApiLimitInfo } from '../../middleware/rateLimiter.js';
 import ProviderManager from '../../providers/ProviderManager.js';
@@ -253,15 +254,8 @@ export class LiveApiService {
         // Enable transcriptions - this is key for saving conversation history
         outputAudioTranscription: {},
         inputAudioTranscription: {},
-        // Use MEDIUM media resolution for 16:9 video (480x270)
+        // Use LOW media resolution for faster video/image processing
         mediaResolution: MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-        // Enable dynamic thinking for Gemini 2.5+ models
-        // thinkingBudget: -1 enables dynamic thinking (model decides when to think)
-        // Set to 0 to disable thinking, or a specific number for fixed budget
-        thinkingConfig: {
-          thinkingBudget: -1, // Dynamic thinking
-          includeThoughts: true // Include thought content in responses
-        }
       };
 
       // Build conversation context summary for system instruction
@@ -314,34 +308,27 @@ Guidelines:
 === OBJECT DETECTION & HIGHLIGHTING CAPABILITY ===
 You have the ability to detect and highlight objects in the user's camera or screen share feed.
 
-IMPORTANT: The video frames you receive are at 480x270 resolution (width × height) in 16:9 aspect ratio. When calculating bounding boxes, use these EXACT dimensions as your reference - NOT any internal processing resolution.
-
 If the user asks you to find, locate, identify, highlight, mark, point out, show, or detect any object (for example: "Where is the fan?", "Highlight the laptop", "Show me my shoes", "Mark the charger", "Point to the door", "Find my keys", "Where are my glasses?"), then you MUST:
 
-1. Look at the current video/camera frame carefully (remember: 480 pixels wide, 270 pixels tall, 16:9 aspect ratio)
+1. Look at the current video/camera frame carefully
 2. Identify the object(s) the user is asking about
 3. Call the "highlighter" function with the bounding box coordinates
 4. The bounding box coordinates should be normalized (0-1000 scale) where:
    - y_min, x_min = top-left corner of the bounding box (format: [y_min, x_min, y_max, x_max])
    - y_max, x_max = bottom-right corner of the bounding box
    - All values are relative to the frame dimensions (0 = left/top edge, 1000 = right/bottom edge)
-   - CRITICAL: Calculate based on 480×270 frame, NOT internal processing dimensions
 
 5. If you find multiple instances of the object, return ALL of them in the array
 6. If you cannot find the object, return an empty array and tell the user you couldn't locate it
 7. Always verbally acknowledge what you found while calling the function
 
-Example function call for finding a laptop at pixel position (x: 120-360, y: 60-200) in a 480x270 frame:
-- x_min: (120/480) * 1000 = 250
-- x_max: (360/480) * 1000 = 750
-- y_min: (60/270) * 1000 = 222
-- y_max: (200/270) * 1000 = 741
-
+Example function call for finding a laptop and a phone:
 highlighter({ objects: [
-  { "label": "laptop", "box_2d": [222, 250, 741, 750] }
+  { "label": "laptop", "box_2d": [120, 200, 450, 500] },
+  { "label": "phone", "box_2d": [600, 300, 700, 450] }
 ]})
 
-The Apsara app displays video at 16:9 aspect ratio matching the frame, so bounding boxes will align perfectly with what the user sees.
+The Apsara app will overlay these bounding boxes on the user's live camera/video feed to show them exactly where the objects are.
 
 === VOICE & SPEED ADAPTATION ===
 You have native capability to change your voice and speaking speed based on user requests. If a user asks you to speak in a different voice, tone, or style (for example: "answer in a spooky whispering voice", "speak faster", "talk like a robot", "use a cheerful voice", "whisper this", "speak slowly"), you should adapt your voice and delivery style accordingly. This is a native feature of your voice system, so you can naturally adjust your tone, pace, and speaking style to match the user's request.
@@ -388,8 +375,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       };
       
       // Add Google Search tool and highlighter function for real-time information
-      // Function calling IS supported in Live API - we just need to send function responses
-      // Using sendToolResponse() after receiving toolCall messages
       liveConfig.tools = [
         { googleSearch: {} },
         { functionDeclarations: [highlighterFunction] }
@@ -457,15 +442,8 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         // Transcription accumulators
         currentInputTranscription: '',
         currentOutputTranscription: '',
-        // Thinking content accumulator (for thinking models like Gemini 2.5/3.x)
-        currentThinkingContent: '',
-        // Thought signatures (for multi-turn function calling with Gemini 3)
-        thoughtSignatures: [],
         // Message buffer for saving complete turns
-        pendingMessages: [],
-        // Tool call state - pause video during tool execution
-        isProcessingToolCall: false,
-        videoFrameQueue: []
+        pendingMessages: []
       };
 
       this.sessionManager.addSession(sessionId, {
@@ -504,92 +482,41 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
     const session = client.session;
     const sc = response.serverContent;
-    
-    // Track what we've handled in this message
-    let messageHandled = false;
 
     // Priority 0: Tool calls (function calling) - handle immediately
-    // IMPORTANT: Extract and preserve thought signatures for function calls (required for Gemini 3, optional for 2.5)
     if (response.toolCall) {
-      console.log('[LiveAPI] 🔧 Tool call received:', JSON.stringify(response.toolCall, null, 2));
-      messageHandled = true;
+      console.log('[LiveAPI] Tool call received:', JSON.stringify(response.toolCall, null, 2));
       await this.handleToolCall(clientId, sessionId, response.toolCall);
     }
 
     // Priority 1: Audio data - send immediately for lowest latency
     if (response.data) {
-      messageHandled = true;
       this.sendToClient(clientId, { type: 'audio_data', sessionId, data: response.data });
     } else if (sc?.modelTurn?.parts?.[0]?.inlineData?.data) {
       const part = sc.modelTurn.parts[0];
       if (part.inlineData.mimeType?.startsWith('audio/')) {
-        messageHandled = true;
         this.sendToClient(clientId, { type: 'audio_data', sessionId, data: part.inlineData.data });
-      }
-    }
-
-    // Handle text and thought parts from model turn (for thinking models)
-    // Thinking models (Gemini 2.5/3.x) can return thought content for reasoning
-    if (sc?.modelTurn?.parts) {
-      for (const part of sc.modelTurn.parts) {
-        // Handle thought parts (thinking process) - accumulate for saving to DB
-        if (part.thought && part.text) {
-          messageHandled = true;
-          console.log(`[LiveAPI] 💭 Thought: "${part.text.substring(0, 100)}..."`);
-          
-          // Accumulate thinking content for later storage in conversation history
-          if (!session.currentThinkingContent) session.currentThinkingContent = '';
-          session.currentThinkingContent += part.text;
-          
-          // Send thinking content to WebSocket client (Android) for UI display
-          this.sendToClient(clientId, { 
-            type: 'thinking_content', 
-            sessionId, 
-            thinking: session.currentThinkingContent 
-          });
-        }
-        // Preserve thought signatures (for Gemini 3 mandatory, Gemini 2.5 optional but recommended)
-        if (part.thoughtSignature) {
-          console.log(`[LiveAPI] 🔑 Thought signature present (preserving for context)`);
-          // Store for potential later use in multi-turn function calling
-          if (!session.thoughtSignatures) session.thoughtSignatures = [];
-          session.thoughtSignatures.push(part.thoughtSignature);
-        }
-        // Handle regular text parts (non-audio, non-thought)
-        else if (part.text && !part.inlineData && !part.thought) {
-          messageHandled = true;
-          console.log(`[LiveAPI] 📝 Model text: "${part.text.substring(0, 100)}..."`);
-          // This is usually spoken text that's also in outputTranscription
-        }
       }
     }
 
     // Priority 2: Transcriptions
     if (sc?.inputTranscription?.text) {
-      messageHandled = true;
       session.currentInputTranscription += sc.inputTranscription.text;
       this.sendToClient(clientId, { type: 'input_transcription', sessionId, text: session.currentInputTranscription });
     }
 
     if (sc?.outputTranscription?.text) {
-      messageHandled = true;
       session.currentOutputTranscription += sc.outputTranscription.text;
       this.sendToClient(clientId, { type: 'output_transcription', sessionId, text: session.currentOutputTranscription });
     }
 
     // Priority 3: Turn/Generation events - save async (don't block)
     if (sc?.turnComplete) {
-      messageHandled = true;
       this.saveTurnMessages(clientId, sessionId); // No await - fire and forget
-      
-      // Clear thinking content for next turn
-      session.currentThinkingContent = '';
-      
       this.sendToClient(clientId, { type: 'turn_complete', sessionId });
     }
 
     if (sc?.generationComplete) {
-      messageHandled = true;
       if (session.currentOutputTranscription || session.currentInputTranscription) {
         this.saveTurnMessages(clientId, sessionId);
       }
@@ -597,35 +524,13 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     if (sc?.interrupted) {
-      messageHandled = true;
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
-      session.currentThinkingContent = ''; // Clear thinking on interruption
       this.sendToClient(clientId, { type: 'interrupted', sessionId });
     }
 
     if (response.goAway) {
-      messageHandled = true;
       this.sendToClient(clientId, { type: 'go_away', sessionId, timeLeft: response.goAway.timeLeft });
-    }
-    
-    // Log unhandled/unknown messages with full structure
-    if (!messageHandled) {
-      console.log('[LiveAPI] ⚠️ UNHANDLED MESSAGE - Full structure:');
-      console.log(JSON.stringify(response, null, 2));
-      
-      // Check for specific patterns that might be causing issues
-      if (sc?.modelTurn?.parts) {
-        console.log('[LiveAPI] Model turn parts found:');
-        sc.modelTurn.parts.forEach((part, idx) => {
-          console.log(`  Part ${idx}:`, Object.keys(part));
-          if (part.text) console.log(`    - text: "${part.text.substring(0, 100)}..."`);
-          if (part.thought) console.log(`    - thought: true`);
-          if (part.thoughtSignature) console.log(`    - thoughtSignature: present`);
-          if (part.executableCode) console.log(`    - executableCode: present`);
-          if (part.codeExecutionResult) console.log(`    - codeExecutionResult: present`);
-        });
-      }
     }
   }
 
@@ -639,9 +544,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
     const session = client.session;
     const functionResponses = [];
-
-    // Mark tool call processing started - pause video frames briefly
-    session.isProcessingToolCall = true;
 
     console.log('[LiveAPI] Processing tool call for session:', sessionId);
 
@@ -692,19 +594,9 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       try {
         console.log('[LiveAPI] Sending tool responses:', JSON.stringify(functionResponses, null, 2));
         await session.geminiSession.sendToolResponse({ functionResponses });
-        console.log('[LiveAPI] ✅ Tool responses sent successfully');
-        
-        // Resume video frames after a short delay
-        setTimeout(() => {
-          if (session) session.isProcessingToolCall = false;
-          console.log('[LiveAPI] Tool call complete - resuming video');
-        }, 500); // Wait 500ms before resuming
       } catch (error) {
-        console.error('[LiveAPI] ❌ Error sending tool response:', error.message);
-        session.isProcessingToolCall = false; // Resume on error
+        console.error('[LiveAPI] Error sending tool response:', error.message);
       }
-    } else {
-      session.isProcessingToolCall = false;
     }
   }
 
@@ -755,10 +647,8 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         await conversation.incrementStats('live');
       }
 
-      // Save output transcription as MODEL message (with thinking if available)
+      // Save output transcription as MODEL message
       const outputText = session.currentOutputTranscription?.trim();
-      const thinkingText = session.currentThinkingContent?.trim();
-      
       if (outputText) {
         const messageSequence = conversation.getNextMessageSequence();
         await conversation.save();
@@ -770,11 +660,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
           messageSequence,
           messageType: 'live',
           role: 'model',
-          content: { 
-            text: outputText,
-            // Include thinking content if model used thinking
-            ...(thinkingText && { thinking: thinkingText })
-          },
+          content: { text: outputText },
           config: {
             live: {
               model: session.model,
@@ -796,7 +682,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       // Clear accumulators for next turn
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
-      session.currentThinkingContent = '';
 
     } catch (error) {
       // Error saving turn messages
@@ -1133,5 +1018,3 @@ export async function setupLiveApiServer(wss) {
   console.log('✅ Live API WebSocket server ready');
   return liveApiService;
 }
-
-
