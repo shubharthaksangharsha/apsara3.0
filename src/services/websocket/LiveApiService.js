@@ -451,7 +451,10 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         currentInputTranscription: '',
         currentOutputTranscription: '',
         // Message buffer for saving complete turns
-        pendingMessages: []
+        pendingMessages: [],
+        // Tool call state - pause video during tool execution
+        isProcessingToolCall: false,
+        videoFrameQueue: []
       };
 
       this.sessionManager.addSession(sessionId, {
@@ -544,7 +547,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
   /**
    * Handle tool calls from Gemini (function calling)
-x`   * Processes function calls and sends responses back to the model
+   * Processes function calls and sends responses back to the model
    */
   async handleToolCall(clientId, sessionId, toolCall) {
     const client = this.clients.get(clientId);
@@ -552,6 +555,9 @@ x`   * Processes function calls and sends responses back to the model
 
     const session = client.session;
     const functionResponses = [];
+
+    // Mark tool call processing started - pause video frames briefly
+    session.isProcessingToolCall = true;
 
     console.log('[LiveAPI] Processing tool call for session:', sessionId);
 
@@ -602,9 +608,19 @@ x`   * Processes function calls and sends responses back to the model
       try {
         console.log('[LiveAPI] Sending tool responses:', JSON.stringify(functionResponses, null, 2));
         await session.geminiSession.sendToolResponse({ functionResponses });
+        console.log('[LiveAPI] ✅ Tool responses sent successfully');
+        
+        // Resume video frames after a short delay
+        setTimeout(() => {
+          if (session) session.isProcessingToolCall = false;
+          console.log('[LiveAPI] Tool call complete - resuming video');
+        }, 500); // Wait 500ms before resuming
       } catch (error) {
-        console.error('[LiveAPI] Error sending tool response:', error.message);
+        console.error('[LiveAPI] ❌ Error sending tool response:', error.message);
+        session.isProcessingToolCall = false; // Resume on error
       }
+    } else {
+      session.isProcessingToolCall = false;
     }
   }
 

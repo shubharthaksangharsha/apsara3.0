@@ -246,7 +246,13 @@ export class GoogleProvider extends BaseProvider {
             if (callbacks.onopen) callbacks.onopen();
           },
           onmessage: (message) => {
-            console.log(`📨 Google Live message received:`, message?.type || 'unknown type');
+            const messageType = message?.serverContent?.modelTurn ? 'modelTurn' :
+                              message?.serverContent?.turnComplete ? 'turnComplete' :
+                              message?.serverContent?.interrupted ? 'interrupted' :
+                              message?.toolCall ? 'toolCall' :
+                              message?.data ? 'audioData' :
+                              message?.type || 'unknown';
+            console.log(`📨 Google Live message:`, messageType);
             if (callbacks.onmessage) callbacks.onmessage(message);
           },
           onerror: (error) => {
