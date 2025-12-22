@@ -54,19 +54,38 @@ function validateThinkingBudget(model, thinkingBudget) {
  */
 function formatConversationHistory(messages, includeThoughts = false) {
   return messages.map(msg => {
-    const formattedMessage = {
-      role: msg.role,
-      parts: [{ text: msg.content.text }]
-    };
+    const parts = [];
+    
+    // Add file parts FIRST (if any) - files need to come before text in Gemini API
+    if (msg.content.files && msg.content.files.length > 0) {
+      for (const file of msg.content.files) {
+        if (file.uri) {
+          // Create file part with URI and MIME type
+          parts.push({
+            fileData: {
+              fileUri: file.uri,
+              mimeType: file.mimeType
+            }
+          });
+          console.log(`📎 Added file to history: ${file.name} (${file.mimeType})`);
+        }
+      }
+    }
+    
+    // Add text content
+    parts.push({ text: msg.content.text });
 
     // Include thoughts if requested and available
     if (includeThoughts && msg.content.thoughts) {
-      formattedMessage.parts.push({ 
+      parts.push({ 
         text: `[Previous thoughts: ${msg.content.thoughts}]` 
       });
     }
 
-    return formattedMessage;
+    return {
+      role: msg.role,
+      parts: parts
+    };
   });
 }
 

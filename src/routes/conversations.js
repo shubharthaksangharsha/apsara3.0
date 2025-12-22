@@ -139,7 +139,7 @@ router.get('/:conversationId/messages', asyncHandler(async (req, res) => {
     .sort({ createdAt: 1 })
     .limit(parseInt(limit))
     .skip(parseInt(offset))
-    .select('messageId content role thoughts timestamp createdAt');
+    .select('messageId content role thoughts timestamp createdAt files');
 
   res.json({
     success: true,
