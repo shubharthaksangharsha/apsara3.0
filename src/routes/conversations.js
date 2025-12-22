@@ -16,7 +16,7 @@ const createConversationSchema = Joi.object({
     model: Joi.string().default('gemini-2.5-flash'),
     systemInstruction: Joi.string(),
     temperature: Joi.number().min(0).max(2).default(0.7),
-    maxOutputTokens: Joi.number().min(1).max(8192).default(2048)
+    maxOutputTokens: Joi.number().min(1).max(65536).default(8192) // Updated to 65536
   }).default({})
 });
 
@@ -27,7 +27,7 @@ const updateConversationSchema = Joi.object({
     model: Joi.string(),
     systemInstruction: Joi.string(),
     temperature: Joi.number().min(0).max(2),
-    maxOutputTokens: Joi.number().min(1).max(8192)
+    maxOutputTokens: Joi.number().min(1).max(65536) // Updated to 65536
   })
 });
 

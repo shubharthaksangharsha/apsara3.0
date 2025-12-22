@@ -926,7 +926,7 @@ router.post('/:fileId/analyze', asyncHandler(async (req, res) => {
     config: Joi.object({
       systemInstruction: Joi.string(),
       temperature: Joi.number().min(0).max(2).default(0.7),
-      maxOutputTokens: Joi.number().min(1).max(8192).default(2048)
+      maxOutputTokens: Joi.number().min(1).max(65536).default(8192)
     }).default({})
   });
 
@@ -1002,7 +1002,7 @@ router.post('/analyze-local', upload.single('file'), asyncHandler(async (req, re
     config: Joi.object({
       systemInstruction: Joi.string(),
       temperature: Joi.number().min(0).max(2).default(0.7),
-      maxOutputTokens: Joi.number().min(1).max(8192).default(2048)
+      maxOutputTokens: Joi.number().min(1).max(65536).default(8192)
     }).default({})
   });
 

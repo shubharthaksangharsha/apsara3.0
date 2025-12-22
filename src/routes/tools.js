@@ -63,7 +63,7 @@ const pluginExecutionSchema = Joi.object({
     model: Joi.string().default('gemini-2.5-flash'),
     provider: Joi.string().default('google'),
     temperature: Joi.number().min(0).max(2).default(0.7),
-    maxOutputTokens: Joi.number().min(1).max(8192).default(2048),
+    maxOutputTokens: Joi.number().min(1).max(65536).default(8192), // Updated to 65536
     topP: Joi.number().min(0).max(1),
     topK: Joi.number().min(1).max(40),
     includeConversationHistory: Joi.boolean().default(true),
