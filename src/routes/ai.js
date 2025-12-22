@@ -19,26 +19,54 @@ const router = express.Router();
  * @returns {Object} Validation result
  */
 function validateThinkingBudget(model, thinkingBudget) {
-  // Dynamic thinking (-1) is always allowed
+  // Dynamic thinking (-1) is always allowed for all models
   if (thinkingBudget === -1) {
     return { valid: true };
   }
 
   // Model-specific ranges based on Gemini documentation
   if (model === 'gemini-2.5-pro') {
-    // Pro cannot disable thinking, minimum 128
+    // Pro cannot disable thinking, minimum 128, maximum 32768
+    if (thinkingBudget === 0) {
+      return {
+        valid: false,
+        message: 'Gemini 2.5 Pro cannot disable thinking (minimum 128 tokens required)'
+      };
+    }
     if (thinkingBudget < 128 || thinkingBudget > 32768) {
       return {
         valid: false,
-        message: 'Gemini 2.5 Pro thinking budget must be between 128-32768 tokens (cannot be disabled)'
+        message: 'Gemini 2.5 Pro thinking budget must be between 128-32768 tokens'
       };
     }
   } else if (model === 'gemini-2.5-flash') {
-    // Flash can be disabled (0) or 0-24576
+    // Flash can be disabled (0) or 1-24576
     if (thinkingBudget < 0 || thinkingBudget > 24576) {
       return {
         valid: false,
-        message: 'Gemini 2.5 Flash thinking budget must be 0 (disabled) or between 1-24576 tokens'
+        message: 'Gemini 2.5 Flash thinking budget must be 0 (disabled) or 1-24576 tokens'
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validate max output tokens based on model type
+ * @param {string} model - Model name
+ * @param {number} maxOutputTokens - Maximum output tokens
+ * @returns {Object} Validation result
+ */
+function validateMaxOutputTokens(model, maxOutputTokens) {
+  // Both Gemini 2.5 models have a max output token limit of 8192
+  const MAX_OUTPUT_TOKENS = 8192;
+  
+  if (model === 'gemini-2.5-pro' || model === 'gemini-2.5-flash') {
+    if (maxOutputTokens < 1 || maxOutputTokens > MAX_OUTPUT_TOKENS) {
+      return {
+        valid: false,
+        message: `${model} max output tokens must be between 1-${MAX_OUTPUT_TOKENS}`
       };
     }
   }
@@ -54,38 +82,19 @@ function validateThinkingBudget(model, thinkingBudget) {
  */
 function formatConversationHistory(messages, includeThoughts = false) {
   return messages.map(msg => {
-    const parts = [];
-    
-    // Add file parts FIRST (if any) - files need to come before text in Gemini API
-    if (msg.content.files && msg.content.files.length > 0) {
-      for (const file of msg.content.files) {
-        if (file.uri) {
-          // Create file part with URI and MIME type
-          parts.push({
-            fileData: {
-              fileUri: file.uri,
-              mimeType: file.mimeType
-            }
-          });
-          console.log(`📎 Added file to history: ${file.name} (${file.mimeType})`);
-        }
-      }
-    }
-    
-    // Add text content
-    parts.push({ text: msg.content.text });
+    const formattedMessage = {
+      role: msg.role,
+      parts: [{ text: msg.content.text }]
+    };
 
     // Include thoughts if requested and available
     if (includeThoughts && msg.content.thoughts) {
-      parts.push({ 
+      formattedMessage.parts.push({ 
         text: `[Previous thoughts: ${msg.content.thoughts}]` 
       });
     }
 
-    return {
-      role: msg.role,
-      parts: parts
-    };
+    return formattedMessage;
   });
 }
 
@@ -105,13 +114,13 @@ const generateSchema = Joi.object({
   provider: Joi.string().default('google'),
   config: Joi.object({
     temperature: Joi.number().min(0).max(2).default(0.7),
-    maxOutputTokens: Joi.number().min(1).max(8192).default(2048),
+    maxOutputTokens: Joi.number().min(1).max(8192).default(2048), // Max 8192 for both Gemini 2.5 models
     topP: Joi.number().min(0).max(1),
     topK: Joi.number().min(1).max(40),
     systemInstruction: Joi.string(),
     tools: Joi.array(),
     thinkingConfig: Joi.object({
-      thinkingBudget: Joi.number().default(-1),
+      thinkingBudget: Joi.number().default(-1), // -1=AUTO, 0=OFF (Flash only), 128-32768 (Pro), 1-24576 (Flash)
       includeThoughts: Joi.boolean().default(true)
     })
   }).default({}),
@@ -150,13 +159,13 @@ const regenerateSchema = Joi.object({
   provider: Joi.string().default('google'),
   config: Joi.object({
     temperature: Joi.number().min(0).max(2).default(0.7),
-    maxOutputTokens: Joi.number().min(1).max(8192).default(2048),
+    maxOutputTokens: Joi.number().min(1).max(8192).default(2048), // Max 8192 for both Gemini 2.5 models
     topP: Joi.number().min(0).max(1),
     topK: Joi.number().min(1).max(40),
     systemInstruction: Joi.string(),
     tools: Joi.array(),
     thinkingConfig: Joi.object({
-      thinkingBudget: Joi.number().default(-1),
+      thinkingBudget: Joi.number().default(-1), // -1=AUTO, 0=OFF (Flash only), 128-32768 (Pro), 1-24576 (Flash)
       includeThoughts: Joi.boolean().default(true)
     })
   }).default({})
@@ -420,6 +429,18 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
         return res.status(400).json({
           success: false,
           error: 'Invalid thinking budget',
+          details: validation.message
+        });
+      }
+    }
+
+    // Validate max output tokens if specified
+    if (config.maxOutputTokens !== undefined) {
+      const validation = validateMaxOutputTokens(model, config.maxOutputTokens);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid max output tokens',
           details: validation.message
         });
       }
@@ -1227,11 +1248,11 @@ router.post('/edit-message', aiRateLimiter, asyncHandler(async (req, res) => {
     provider: Joi.string().default('google'),
     config: Joi.object({
       temperature: Joi.number().min(0).max(2).default(0.7),
-      maxOutputTokens: Joi.number().min(1).max(8192).default(2048),
+      maxOutputTokens: Joi.number().min(1).max(8192).default(2048), // Max 8192 for both Gemini 2.5 models
       topP: Joi.number().min(0).max(1),
       topK: Joi.number().min(1).max(40),
       thinkingConfig: Joi.object({
-        thinkingBudget: Joi.number().default(-1),
+        thinkingBudget: Joi.number().default(-1), // -1=AUTO, 0=OFF (Flash only), 128-32768 (Pro), 1-24576 (Flash)
         includeThoughts: Joi.boolean().default(true)
       })
     }).default({})
@@ -1278,6 +1299,30 @@ router.post('/edit-message', aiRateLimiter, asyncHandler(async (req, res) => {
       conversationId,
       messageSequence: { $gt: messageToEdit.messageSequence }
     });
+
+    // Validate thinking budget if specified
+    if (config.thinkingConfig?.thinkingBudget !== undefined) {
+      const validation = validateThinkingBudget(model, config.thinkingConfig.thinkingBudget);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid thinking budget',
+          details: validation.message
+        });
+      }
+    }
+
+    // Validate max output tokens if specified
+    if (config.maxOutputTokens !== undefined) {
+      const validation = validateMaxOutputTokens(model, config.maxOutputTokens);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid max output tokens',
+          details: validation.message
+        });
+      }
+    }
 
     // Update the message content
     messageToEdit.content.text = newContent;
@@ -1629,6 +1674,18 @@ router.post('/regenerate', aiRateLimiter, asyncHandler(async (req, res) => {
         return res.status(400).json({
           success: false,
           error: 'Invalid thinking budget',
+          details: validation.message
+        });
+      }
+    }
+
+    // Validate max output tokens if specified
+    if (config.maxOutputTokens !== undefined) {
+      const validation = validateMaxOutputTokens(model, config.maxOutputTokens);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid max output tokens',
           details: validation.message
         });
       }
