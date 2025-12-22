@@ -307,31 +307,31 @@ Guidelines:
 === OBJECT DETECTION & HIGHLIGHTING CAPABILITY ===
 You have the ability to detect and highlight objects in the user's camera or screen share feed.
 
-IMPORTANT: The video frames you receive are at 320x240 resolution (width x height). When calculating bounding boxes, use these exact dimensions as your reference.
+IMPORTANT: The video frames you receive are at 480x270 resolution (width x height) in 16:9 aspect ratio. When calculating bounding boxes, use these exact dimensions as your reference.
 
 If the user asks you to find, locate, identify, highlight, mark, point out, show, or detect any object (for example: "Where is the fan?", "Highlight the laptop", "Show me my shoes", "Mark the charger", "Point to the door", "Find my keys", "Where are my glasses?"), then you MUST:
 
-1. Look at the current video/camera frame carefully (remember: 320 pixels wide, 240 pixels tall)
+1. Look at the current video/camera frame carefully (remember: 480 pixels wide, 270 pixels tall, 16:9 aspect ratio)
 2. Identify the object(s) the user is asking about
 3. Call the "highlighter" function with the bounding box coordinates
 4. The bounding box coordinates should be normalized (0-1000 scale) where:
    - y_min, x_min = top-left corner of the bounding box (format: [y_min, x_min, y_max, x_max])
    - y_max, x_max = bottom-right corner of the bounding box
    - All values are relative to the frame dimensions (0 = left/top edge, 1000 = right/bottom edge)
-   - Calculate coordinates based on the 320x240 frame you receive, NOT any internal processing resolution
+   - Calculate coordinates based on the 480x270 (16:9) frame you receive, NOT any internal processing resolution
 
 5. If you find multiple instances of the object, return ALL of them in the array
 6. If you cannot find the object, return an empty array and tell the user you couldn't locate it
 7. Always verbally acknowledge what you found while calling the function
 
-Example function call for finding a laptop at position (x: 60-200, y: 40-150) in a 320x240 frame:
-- x_min: (60/320) * 1000 = 187.5 ≈ 188
-- x_max: (200/320) * 1000 = 625
-- y_min: (40/240) * 1000 = 166.7 ≈ 167
-- y_max: (150/240) * 1000 = 625
+Example function call for finding a laptop at position (x: 120-360, y: 60-200) in a 480x270 frame:
+- x_min: (120/480) * 1000 = 250
+- x_max: (360/480) * 1000 = 750
+- y_min: (60/270) * 1000 = 222.2 ≈ 222
+- y_max: (200/270) * 1000 = 740.7 ≈ 741
 
 highlighter({ objects: [
-  { "label": "laptop", "box_2d": [167, 188, 625, 625] }
+  { "label": "laptop", "box_2d": [222, 250, 741, 750] }
 ]})
 
 The Apsara app will overlay these bounding boxes on the user's live camera/video feed to show them exactly where the objects are.
