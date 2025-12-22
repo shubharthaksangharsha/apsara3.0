@@ -253,8 +253,15 @@ export class LiveApiService {
         // Enable transcriptions - this is key for saving conversation history
         outputAudioTranscription: {},
         inputAudioTranscription: {},
-        // Use LOW media resolution for faster video/image processing
+        // Use MEDIUM media resolution for 16:9 video (480x270)
         mediaResolution: MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+        // Enable dynamic thinking for Gemini 2.5+ models
+        // thinkingBudget: -1 enables dynamic thinking (model decides when to think)
+        // Set to 0 to disable thinking, or a specific number for fixed budget
+        thinkingConfig: {
+          thinkingBudget: -1, // Dynamic thinking
+          includeThoughts: true // Include thought content in responses
+        }
       };
 
       // Build conversation context summary for system instruction
@@ -307,7 +314,7 @@ Guidelines:
 === OBJECT DETECTION & HIGHLIGHTING CAPABILITY ===
 You have the ability to detect and highlight objects in the user's camera or screen share feed.
 
-IMPORTANT: The video frames you receive are at 480x270 resolution (width x height) in 16:9 aspect ratio. When calculating bounding boxes, use these exact dimensions as your reference.
+IMPORTANT: The video frames you receive are at 480x270 resolution (width × height) in 16:9 aspect ratio. When calculating bounding boxes, use these EXACT dimensions as your reference - NOT any internal processing resolution.
 
 If the user asks you to find, locate, identify, highlight, mark, point out, show, or detect any object (for example: "Where is the fan?", "Highlight the laptop", "Show me my shoes", "Mark the charger", "Point to the door", "Find my keys", "Where are my glasses?"), then you MUST:
 
@@ -318,23 +325,23 @@ If the user asks you to find, locate, identify, highlight, mark, point out, show
    - y_min, x_min = top-left corner of the bounding box (format: [y_min, x_min, y_max, x_max])
    - y_max, x_max = bottom-right corner of the bounding box
    - All values are relative to the frame dimensions (0 = left/top edge, 1000 = right/bottom edge)
-   - Calculate coordinates based on the 480x270 (16:9) frame you receive, NOT any internal processing resolution
+   - CRITICAL: Calculate based on 480×270 frame, NOT internal processing dimensions
 
 5. If you find multiple instances of the object, return ALL of them in the array
 6. If you cannot find the object, return an empty array and tell the user you couldn't locate it
 7. Always verbally acknowledge what you found while calling the function
 
-Example function call for finding a laptop at position (x: 120-360, y: 60-200) in a 480x270 frame:
+Example function call for finding a laptop at pixel position (x: 120-360, y: 60-200) in a 480x270 frame:
 - x_min: (120/480) * 1000 = 250
 - x_max: (360/480) * 1000 = 750
-- y_min: (60/270) * 1000 = 222.2 ≈ 222
-- y_max: (200/270) * 1000 = 740.7 ≈ 741
+- y_min: (60/270) * 1000 = 222
+- y_max: (200/270) * 1000 = 741
 
 highlighter({ objects: [
   { "label": "laptop", "box_2d": [222, 250, 741, 750] }
 ]})
 
-The Apsara app will overlay these bounding boxes on the user's live camera/video feed to show them exactly where the objects are.
+The Apsara app displays video at 16:9 aspect ratio matching the frame, so bounding boxes will align perfectly with what the user sees.
 
 === VOICE & SPEED ADAPTATION ===
 You have native capability to change your voice and speaking speed based on user requests. If a user asks you to speak in a different voice, tone, or style (for example: "answer in a spooky whispering voice", "speak faster", "talk like a robot", "use a cheerful voice", "whisper this", "speak slowly"), you should adapt your voice and delivery style accordingly. This is a native feature of your voice system, so you can naturally adjust your tone, pace, and speaking style to match the user's request.
@@ -450,6 +457,10 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         // Transcription accumulators
         currentInputTranscription: '',
         currentOutputTranscription: '',
+        // Thinking content accumulator (for thinking models like Gemini 2.5/3.x)
+        currentThinkingContent: '',
+        // Thought signatures (for multi-turn function calling with Gemini 3)
+        thoughtSignatures: [],
         // Message buffer for saving complete turns
         pendingMessages: [],
         // Tool call state - pause video during tool execution
@@ -498,6 +509,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     let messageHandled = false;
 
     // Priority 0: Tool calls (function calling) - handle immediately
+    // IMPORTANT: Extract and preserve thought signatures for function calls (required for Gemini 3, optional for 2.5)
     if (response.toolCall) {
       console.log('[LiveAPI] 🔧 Tool call received:', JSON.stringify(response.toolCall, null, 2));
       messageHandled = true;
@@ -517,17 +529,34 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     // Handle text and thought parts from model turn (for thinking models)
+    // Thinking models (Gemini 2.5/3.x) can return thought content for reasoning
     if (sc?.modelTurn?.parts) {
       for (const part of sc.modelTurn.parts) {
-        // Handle thought parts (thinking process)
+        // Handle thought parts (thinking process) - accumulate for saving to DB
         if (part.thought && part.text) {
           messageHandled = true;
-          console.log(`[LiveAPI] 🧠 Thought: "${part.text.substring(0, 100)}..."`);
-          // Optionally send to client for debugging
-          // this.sendToClient(clientId, { type: 'model_thought', sessionId, thought: part.text });
+          console.log(`[LiveAPI] 💭 Thought: "${part.text.substring(0, 100)}..."`);
+          
+          // Accumulate thinking content for later storage in conversation history
+          if (!session.currentThinkingContent) session.currentThinkingContent = '';
+          session.currentThinkingContent += part.text;
+          
+          // Send thinking content to WebSocket client (Android) for UI display
+          this.sendToClient(clientId, { 
+            type: 'thinking_content', 
+            sessionId, 
+            thinking: session.currentThinkingContent 
+          });
+        }
+        // Preserve thought signatures (for Gemini 3 mandatory, Gemini 2.5 optional but recommended)
+        if (part.thoughtSignature) {
+          console.log(`[LiveAPI] 🔑 Thought signature present (preserving for context)`);
+          // Store for potential later use in multi-turn function calling
+          if (!session.thoughtSignatures) session.thoughtSignatures = [];
+          session.thoughtSignatures.push(part.thoughtSignature);
         }
         // Handle regular text parts (non-audio, non-thought)
-        else if (part.text && !part.inlineData) {
+        else if (part.text && !part.inlineData && !part.thought) {
           messageHandled = true;
           console.log(`[LiveAPI] 📝 Model text: "${part.text.substring(0, 100)}..."`);
           // This is usually spoken text that's also in outputTranscription
@@ -552,6 +581,10 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     if (sc?.turnComplete) {
       messageHandled = true;
       this.saveTurnMessages(clientId, sessionId); // No await - fire and forget
+      
+      // Clear thinking content for next turn
+      session.currentThinkingContent = '';
+      
       this.sendToClient(clientId, { type: 'turn_complete', sessionId });
     }
 
@@ -567,6 +600,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       messageHandled = true;
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
+      session.currentThinkingContent = ''; // Clear thinking on interruption
       this.sendToClient(clientId, { type: 'interrupted', sessionId });
     }
 
@@ -721,8 +755,10 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         await conversation.incrementStats('live');
       }
 
-      // Save output transcription as MODEL message
+      // Save output transcription as MODEL message (with thinking if available)
       const outputText = session.currentOutputTranscription?.trim();
+      const thinkingText = session.currentThinkingContent?.trim();
+      
       if (outputText) {
         const messageSequence = conversation.getNextMessageSequence();
         await conversation.save();
@@ -734,7 +770,11 @@ Remember: You're having a real-time voice conversation, so keep responses natura
           messageSequence,
           messageType: 'live',
           role: 'model',
-          content: { text: outputText },
+          content: { 
+            text: outputText,
+            // Include thinking content if model used thinking
+            ...(thinkingText && { thinking: thinkingText })
+          },
           config: {
             live: {
               model: session.model,
@@ -756,6 +796,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       // Clear accumulators for next turn
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
+      session.currentThinkingContent = '';
 
     } catch (error) {
       // Error saving turn messages
