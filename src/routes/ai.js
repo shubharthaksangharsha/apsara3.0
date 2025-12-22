@@ -59,14 +59,14 @@ function validateThinkingBudget(model, thinkingBudget) {
  * @returns {Object} Validation result
  */
 function validateMaxOutputTokens(model, maxOutputTokens) {
-  // Both Gemini 2.5 models have a max output token limit of 8192
-  const MAX_OUTPUT_TOKENS = 8192;
+  // Gemini 2.5 models have a max output token limit of 65,536
+  let maxLimit = 65536;
   
   if (model === 'gemini-2.5-pro' || model === 'gemini-2.5-flash') {
-    if (maxOutputTokens < 1 || maxOutputTokens > MAX_OUTPUT_TOKENS) {
+    if (maxOutputTokens < 1 || maxOutputTokens > maxLimit) {
       return {
         valid: false,
-        message: `${model} max output tokens must be between 1-${MAX_OUTPUT_TOKENS}`
+        message: `${model} max output tokens must be between 1-${maxLimit}`
       };
     }
   }
@@ -114,7 +114,7 @@ const generateSchema = Joi.object({
   provider: Joi.string().default('google'),
   config: Joi.object({
     temperature: Joi.number().min(0).max(2).default(0.7),
-    maxOutputTokens: Joi.number().min(1).max(8192).default(2048), // Max 8192 for both Gemini 2.5 models
+    maxOutputTokens: Joi.number().min(1).max(65536).default(8192), // Max 65536 for both Gemini 2.5 models
     topP: Joi.number().min(0).max(1),
     topK: Joi.number().min(1).max(40),
     systemInstruction: Joi.string(),
@@ -159,7 +159,7 @@ const regenerateSchema = Joi.object({
   provider: Joi.string().default('google'),
   config: Joi.object({
     temperature: Joi.number().min(0).max(2).default(0.7),
-    maxOutputTokens: Joi.number().min(1).max(8192).default(2048), // Max 8192 for both Gemini 2.5 models
+    maxOutputTokens: Joi.number().min(1).max(65536).default(8192), // Max 65536 for both Gemini 2.5 models
     topP: Joi.number().min(0).max(1),
     topK: Joi.number().min(1).max(40),
     systemInstruction: Joi.string(),
@@ -1248,7 +1248,7 @@ router.post('/edit-message', aiRateLimiter, asyncHandler(async (req, res) => {
     provider: Joi.string().default('google'),
     config: Joi.object({
       temperature: Joi.number().min(0).max(2).default(0.7),
-      maxOutputTokens: Joi.number().min(1).max(8192).default(2048), // Max 8192 for both Gemini 2.5 models
+      maxOutputTokens: Joi.number().min(1).max(65536).default(8192), // Max 65536 for both Gemini 2.5 models
       topP: Joi.number().min(0).max(1),
       topK: Joi.number().min(1).max(40),
       thinkingConfig: Joi.object({
