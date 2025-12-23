@@ -2075,6 +2075,12 @@ router.post('/update-conversation-title', asyncHandler(async (req, res) => {
       });
     }
 
+    // ============================================================
+    // 🚫 AI TITLE GENERATION COMMENTED OUT TO SAVE API CALLS
+    // ============================================================
+    // Use simple default title based on first user message instead
+    
+    /* ORIGINAL AI TITLE GENERATION CODE - COMMENTED OUT
     // Prepare conversation content for AI title generation
     let conversationContent = '';
     messages.forEach((msg, index) => {
@@ -2129,6 +2135,24 @@ Generate only the title, nothing else. Do not use quotes or extra formatting.`;
     if (!newTitle || newTitle.length < 3) {
       newTitle = 'New Conversation';
     }
+    END OF COMMENTED CODE */
+    
+    // ============================================================
+    // 📝 SIMPLE TITLE GENERATION (NO API CALLS)
+    // ============================================================
+    // Generate title from first user message (first 50 characters)
+    const firstUserMessage = messages.find(msg => msg.role === 'user');
+    let newTitle = 'New Conversation';
+    
+    if (firstUserMessage && firstUserMessage.content.text) {
+      const messageText = firstUserMessage.content.text.trim();
+      // Use first 50 characters, or full message if shorter
+      if (messageText.length > 50) {
+        newTitle = messageText.substring(0, 47) + '...';
+      } else if (messageText.length > 0) {
+        newTitle = messageText;
+      }
+    }
 
     // Store previous title before updating
     const previousTitle = conversation.title;
@@ -2145,13 +2169,14 @@ Generate only the title, nothing else. Do not use quotes or extra formatting.`;
       newTitle: newTitle,
       generatedFrom: {
         messageCount: messages.length,
-        provider,
-        model
+        method: 'simple-extraction', // No AI used, just text extraction
+        provider: 'none', // Not using AI provider
+        model: 'none' // Not using AI model
       },
       usageMetadata: {
-        promptTokenCount: aiResponse.usageMetadata?.promptTokenCount || 0,
-        candidatesTokenCount: aiResponse.usageMetadata?.candidatesTokenCount || 0,
-        totalTokenCount: aiResponse.usageMetadata?.totalTokenCount || 0
+        promptTokenCount: 0, // No API call = no tokens used
+        candidatesTokenCount: 0,
+        totalTokenCount: 0
       }
     });
 
