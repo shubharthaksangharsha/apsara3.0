@@ -797,6 +797,71 @@ export class GoogleProvider extends BaseProvider {
   }
 
   /**
+   * Generate text-to-speech audio using Gemini API
+   * @param {Object} params - TTS parameters
+   * @param {string} params.text - Text to convert to speech
+   * @param {string} params.voice - Voice name (e.g., 'Puck', 'Charon', etc.)
+   * @returns {Promise<Object>} TTS response with base64 audio
+   */
+  async generateTTS(params) {
+    this.validateInitialization();
+
+    const { text, voice = 'Puck' } = params;
+
+    try {
+      // Use Gemini 2.0 Flash Exp TTS model
+      const response = await this.client.models.generateContent({
+        model: 'gemini-2.0-flash-exp',
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `Say: ${text}` }]
+          }
+        ],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: voice
+              }
+            }
+          }
+        }
+      });
+
+      // Extract audio from response
+      let audioBase64 = null;
+      if (response.candidates && response.candidates.length > 0) {
+        const candidate = response.candidates[0];
+        if (candidate.content && candidate.content.parts) {
+          for (const part of candidate.content.parts) {
+            if (part.inlineData && part.inlineData.data) {
+              audioBase64 = part.inlineData.data;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!audioBase64) {
+        throw new Error('No audio data in response');
+      }
+
+      return {
+        success: true,
+        audio: audioBase64,
+        voice: voice,
+        provider: this.name
+      };
+
+    } catch (error) {
+      console.error('Google TTS Error:', error);
+      throw this.createProviderError(error);
+    }
+  }
+
+  /**
    * Create a provider-specific error
    */
   createProviderError(error) {

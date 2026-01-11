@@ -2190,4 +2190,56 @@ Generate only the title, nothing else. Do not use quotes or extra formatting.`;
   }
 }));
 
+/**
+ * @route POST /api/ai/tts
+ * @desc Generate text-to-speech audio using Gemini API
+ * @access Public
+ */
+router.post('/tts', asyncHandler(async (req, res) => {
+  const { text, voice = 'Puck' } = req.body;
+
+  // Validate input
+  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Text is required and must be a non-empty string'
+    });
+  }
+
+  if (text.length > 5000) {
+    return res.status(400).json({
+      success: false,
+      error: 'Text exceeds maximum length of 5000 characters'
+    });
+  }
+
+  try {
+    const providerManager = req.app.locals.providerManager;
+    const provider = providerManager.getProvider('google');
+
+    // Generate TTS audio using Gemini API
+    const response = await provider.generateTTS({
+      text: text.trim(),
+      voice: voice
+    });
+
+    // Return base64 encoded audio
+    res.json({
+      success: true,
+      audio: response.audio,
+      format: 'wav',
+      voice: voice,
+      textLength: text.length
+    });
+
+  } catch (error) {
+    console.error('TTS Generation Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate audio',
+      details: error.message
+    });
+  }
+}));
+
 export default router; 
