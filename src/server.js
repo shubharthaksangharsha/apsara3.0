@@ -171,7 +171,7 @@ class ApsaraServer {
       // Connect to database
       await DatabaseConfig.connect();
 
-      // Initialize AI providers
+      // Initialize AI providers (singleton instance)
       await ProviderManager.initialize();
       
       // Setup WebSocket server

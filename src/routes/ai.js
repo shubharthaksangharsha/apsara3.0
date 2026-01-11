@@ -2214,8 +2214,8 @@ router.post('/tts', asyncHandler(async (req, res) => {
   }
 
   try {
-    const providerManager = req.app.locals.providerManager;
-    const provider = providerManager.getProvider('google');
+    // Use the singleton ProviderManager instance
+    const provider = ProviderManager.getProvider('google');
 
     // Generate TTS audio using Gemini API
     const response = await provider.generateTTS({
