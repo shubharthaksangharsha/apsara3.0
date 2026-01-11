@@ -2196,10 +2196,23 @@ Generate only the title, nothing else. Do not use quotes or extra formatting.`;
  * @access Public
  */
 router.post('/tts', asyncHandler(async (req, res) => {
+  console.log('🎵 ============ TTS ENDPOINT HIT ============');
+  console.log('🎵 TTS Request received:', {
+    method: req.method,
+    path: req.path,
+    headers: req.headers,
+    body: req.body,
+    textLength: req.body?.text?.length,
+    voice: req.body?.voice,
+    hasBody: !!req.body
+  });
+  console.log('🎵 Full request body:', JSON.stringify(req.body, null, 2));
+
   const { text, voice = 'Puck' } = req.body;
 
   // Validate input
   if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    console.log('❌ TTS validation failed: No text provided');
     return res.status(400).json({
       success: false,
       error: 'Text is required and must be a non-empty string'
@@ -2207,6 +2220,7 @@ router.post('/tts', asyncHandler(async (req, res) => {
   }
 
   if (text.length > 5000) {
+    console.log('❌ TTS validation failed: Text too long');
     return res.status(400).json({
       success: false,
       error: 'Text exceeds maximum length of 5000 characters'
@@ -2214,12 +2228,20 @@ router.post('/tts', asyncHandler(async (req, res) => {
   }
 
   try {
+    console.log('🔄 Generating TTS audio...', { text: text.substring(0, 50) + '...', voice });
+    
     // Use the singleton ProviderManager instance
     const provider = ProviderManager.getProvider('google');
 
     // Generate TTS audio using Gemini API
     const response = await provider.generateTTS({
       text: text.trim(),
+      voice: voice
+    });
+
+    console.log('✅ TTS audio generated successfully', {
+      hasAudio: !!response.audio,
+      audioLength: response.audio?.length,
       voice: voice
     });
 
@@ -2233,7 +2255,7 @@ router.post('/tts', asyncHandler(async (req, res) => {
     });
 
   } catch (error) {
-    console.error('TTS Generation Error:', error);
+    console.error('❌ TTS Generation Error:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to generate audio',
