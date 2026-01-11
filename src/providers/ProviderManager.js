@@ -1,7 +1,7 @@
 import { GoogleProvider } from './google/GoogleProvider.js';
+import { GroqProvider } from './groq/GroqProvider.js';
 // Future providers will be imported here
 // import { ClaudeProvider } from './claude/ClaudeProvider.js';
-// import { GrokProvider } from './grok/GrokProvider.js';
 
 /**
  * Provider Manager
@@ -24,14 +24,15 @@ export class ProviderManager {
       await googleProvider.initialize();
       this.providers.set('google', googleProvider);
 
+      // Initialize Groq provider (for fast title generation)
+      const groqProvider = new GroqProvider();
+      await groqProvider.initialize();
+      this.providers.set('groq', groqProvider);
+
       // TODO: Initialize other providers when available
       // const claudeProvider = new ClaudeProvider();
       // await claudeProvider.initialize();
       // this.providers.set('claude', claudeProvider);
-
-      // const grokProvider = new GrokProvider();
-      // await grokProvider.initialize();
-      // this.providers.set('grok', grokProvider);
 
       this.isInitialized = true;
       console.log(`✅ Provider Manager initialized with ${this.providers.size} providers`);

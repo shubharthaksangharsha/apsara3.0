@@ -2059,14 +2059,14 @@ router.post('/update-conversation-title', asyncHandler(async (req, res) => {
       });
     }
 
-    // Get first 3-4 messages from the conversation to understand the topic
+    // Get last 3-6 messages from the conversation for title generation
     const messages = await Message.find({
       conversationId,
       userId,
       role: { $in: ['user', 'model'] } // Only user and AI messages
     })
-    .sort({ messageSequence: 1 })
-    .limit(4); // Get first 4 messages (usually 2 user + 2 AI responses)
+    .sort({ messageSequence: -1 }) // Get most recent messages
+    .limit(6); // Get last 6 messages (3 user + 3 AI responses typically)
 
     if (messages.length === 0) {
       return res.status(400).json({
@@ -2075,83 +2075,70 @@ router.post('/update-conversation-title', asyncHandler(async (req, res) => {
       });
     }
 
+    // Reverse to get chronological order
+    messages.reverse();
+
     // ============================================================
-    // 🚫 AI TITLE GENERATION COMMENTED OUT TO SAVE API CALLS
+    // 🚀 AI TITLE GENERATION USING GROQ (FAST & RELIABLE)
     // ============================================================
-    // Use simple default title based on first user message instead
+    // Use Groq's ultra-fast LLM inference for chat title generation
+    // Falls back to smart extraction if Groq unavailable
     
-    /* ORIGINAL AI TITLE GENERATION CODE - COMMENTED OUT
     // Prepare conversation content for AI title generation
     let conversationContent = '';
-    messages.forEach((msg, index) => {
+    messages.forEach((msg) => {
       const role = msg.role === 'user' ? 'User' : 'Assistant';
       const content = msg.content.text || '';
-      conversationContent += `${role}: ${content}\n`;
+      // Limit each message to 150 characters to keep prompt concise
+      const truncatedContent = content.length > 150 ? content.substring(0, 147) + '...' : content;
+      conversationContent += `${role}: ${truncatedContent}\n`;
     });
 
-    // Create AI prompt for title generation
-    const titlePrompt = `Based on the following conversation, generate a concise, descriptive title (3-6 words maximum) that captures the main topic or question being discussed. The title should be clear, specific, and helpful for identifying the conversation later.
-
-Conversation:
-${conversationContent}
-
-Generate only the title, nothing else. Do not use quotes or extra formatting.`;
-
-    // Generate title using AI
-    const aiResponse = await ProviderManager.generateContent({
-      provider,
-      contents: [{
-        role: 'user',
-        parts: [{ text: titlePrompt }]
-      }],
-      config: {
-        model,
-        temperature: 0.3, // Lower temperature for more consistent results
-        maxOutputTokens: 50, // Short response
-        systemInstruction: 'You are an expert at creating concise, descriptive titles for conversations. Generate titles that are 3-6 words and clearly identify the main topic.'
-      }
-    });
-
-    if (!aiResponse.success) {
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to generate title',
-        details: aiResponse.error
-      });
-    }
-
-    // Clean up the generated title
-    let newTitle = aiResponse.text.trim();
-    
-    // Remove quotes if present
-    newTitle = newTitle.replace(/^["']|["']$/g, '');
-    
-    // Limit length to 100 characters max
-    if (newTitle.length > 100) {
-      newTitle = newTitle.substring(0, 97) + '...';
-    }
-    
-    // Fallback if title is empty or too short
-    if (!newTitle || newTitle.length < 3) {
-      newTitle = 'New Conversation';
-    }
-    END OF COMMENTED CODE */
-    
-    // ============================================================
-    // 📝 SIMPLE TITLE GENERATION (NO API CALLS)
-    // ============================================================
-    // Generate title from first user message (first 50 characters)
-    const firstUserMessage = messages.find(msg => msg.role === 'user');
     let newTitle = 'New Conversation';
-    
-    if (firstUserMessage && firstUserMessage.content.text) {
-      const messageText = firstUserMessage.content.text.trim();
-      // Use first 50 characters, or full message if shorter
-      if (messageText.length > 50) {
-        newTitle = messageText.substring(0, 47) + '...';
-      } else if (messageText.length > 0) {
-        newTitle = messageText;
+    let titleGenerationMethod = 'fallback';
+    let titleGenerationError = null;
+    let titleMetadata = {};
+
+    try {
+      // Get Groq provider
+      const groqProvider = ProviderManager.getProvider('groq');
+      
+      // Generate title using Groq (fast AI mode)
+      const titleResult = await groqProvider.generateChatTitle(conversationContent, {
+        maxTokens: 10,
+        temperature: 0.2
+      });
+
+      if (titleResult.success) {
+        newTitle = titleResult.title;
+        titleGenerationMethod = titleResult.method; // 'ai-generation' or 'smart-extraction'
+        titleMetadata = titleResult;
+        console.log(`✅ Generated chat title using ${titleResult.method}: "${newTitle}"`);
+      } else {
+        // Groq returned a fallback title
+        newTitle = titleResult.title;
+        titleGenerationMethod = 'groq-fallback';
+        titleGenerationError = titleResult.error;
+        console.log(`⚠️  Groq title generation failed, using fallback: "${newTitle}"`);
       }
+    } catch (error) {
+      // If Groq fails entirely, use simple extraction fallback
+      console.error('❌ Groq provider error:', error);
+      titleGenerationError = error.message;
+      
+      // Fallback: Generate title from first user message
+      const firstUserMessage = messages.find(msg => msg.role === 'user');
+      if (firstUserMessage && firstUserMessage.content.text) {
+        const messageText = firstUserMessage.content.text.trim();
+        // Use first 50 characters, or full message if shorter
+        if (messageText.length > 50) {
+          newTitle = messageText.substring(0, 47) + '...';
+        } else if (messageText.length > 0) {
+          newTitle = messageText;
+        }
+      }
+      titleGenerationMethod = 'simple-extraction';
+      console.log(`⚠️  Using simple extraction fallback: "${newTitle}"`);
     }
 
     // Store previous title before updating
@@ -2169,14 +2156,17 @@ Generate only the title, nothing else. Do not use quotes or extra formatting.`;
       newTitle: newTitle,
       generatedFrom: {
         messageCount: messages.length,
-        method: 'simple-extraction', // No AI used, just text extraction
-        provider: 'none', // Not using AI provider
-        model: 'none' // Not using AI model
+        method: titleGenerationMethod,
+        provider: titleMetadata.provider || 'none',
+        model: titleMetadata.model || 'none',
+        responseTime: titleMetadata.responseTime || 'N/A',
+        error: titleGenerationError
       },
-      usageMetadata: {
-        promptTokenCount: 0, // No API call = no tokens used
-        candidatesTokenCount: 0,
-        totalTokenCount: 0
+      usageMetadata: titleMetadata.usage || {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        cost: titleMetadata.cost || 'FREE'
       }
     });
 
