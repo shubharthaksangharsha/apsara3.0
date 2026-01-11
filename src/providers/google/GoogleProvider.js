@@ -809,9 +809,9 @@ export class GoogleProvider extends BaseProvider {
     const { text, voice = 'Puck' } = params;
 
     try {
-      // Use Gemini 2.0 Flash Exp TTS model
+      // Use Gemini 2.5 Flash Preview TTS model (correct TTS model)
       const response = await this.client.models.generateContent({
-        model: 'gemini-2.0-flash-exp',
+        model: 'gemini-2.5-flash-preview-tts',
         contents: [
           {
             role: 'user',
