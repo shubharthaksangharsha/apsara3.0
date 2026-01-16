@@ -395,15 +395,17 @@ ${inputText}`;
       model: model,
       messages: messages,
       temperature: temperature,
-      max_tokens: maxOutputTokens,
+      max_completion_tokens: maxOutputTokens, // Groq uses max_completion_tokens
       top_p: topP,
       stream: true
     };
 
-    // Add reasoning parameters for reasoning models
+    // Add reasoning parameters for reasoning models (following Groq docs)
     if (thinkingConfig && thinkingConfig.thinkingBudget > 0) {
-      // GPT-OSS models support reasoning_effort
+      // GPT-OSS models: use include_reasoning and reasoning_effort
       if (model.includes('gpt-oss')) {
+        requestOptions.include_reasoning = true;
+        
         // Map thinking budget to reasoning effort
         if (thinkingConfig.thinkingBudget >= 10000) {
           requestOptions.reasoning_effort = 'high';
@@ -412,11 +414,18 @@ ${inputText}`;
         } else {
           requestOptions.reasoning_effort = 'low';
         }
-        requestOptions.include_reasoning = true;
       }
-      // Qwen models support reasoning parameters
+      // Qwen models: use reasoning_format and reasoning_effort
       else if (model.includes('qwen')) {
-        requestOptions.reasoning_effort = thinkingConfig.thinkingBudget > 0 ? 'default' : 'none';
+        requestOptions.reasoning_format = 'raw'; // Include <think> tags in content
+        requestOptions.reasoning_effort = 'default'; // Enable reasoning
+      }
+    } else {
+      // Disable reasoning when not requested
+      if (model.includes('gpt-oss')) {
+        requestOptions.include_reasoning = false;
+      } else if (model.includes('qwen')) {
+        requestOptions.reasoning_effort = 'none';
       }
     }
 
@@ -433,23 +442,25 @@ ${inputText}`;
         let chunkText = delta.content || '';
         let chunkThought = '';
 
-        // Handle reasoning/thinking from GPT-OSS models
+        // Handle reasoning from GPT-OSS models (comes in delta.reasoning field)
         if (delta.reasoning) {
           chunkThought = delta.reasoning;
           fullThoughts += chunkThought;
         }
 
-        // Handle Qwen <think> tags
+        // Handle Qwen <think> tags (embedded in content when reasoning_format=raw)
         if (model.includes('qwen') && chunkText) {
           // Extract thinking content from <think> tags
-          const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
-          let match;
-          while ((match = thinkRegex.exec(chunkText)) !== null) {
-            chunkThought += match[1];
-            fullThoughts += match[1];
+          const thinkMatches = chunkText.match(/<think>([\s\S]*?)<\/think>/g);
+          if (thinkMatches) {
+            for (const match of thinkMatches) {
+              const thinking = match.replace(/<think>|<\/think>/g, '');
+              chunkThought += thinking;
+              fullThoughts += thinking;
+            }
+            // Remove <think> tags from main content
+            chunkText = chunkText.replace(/<think>[\s\S]*?<\/think>/g, '');
           }
-          // Remove <think> tags from main content
-          chunkText = chunkText.replace(/<think>[\s\S]*?<\/think>/g, '');
         }
 
         yield {
