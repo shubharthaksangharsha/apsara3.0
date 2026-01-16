@@ -78,11 +78,13 @@ export class GroqProvider extends BaseProvider {
       console.log(`📝 Model: ${model}`);
       console.log(`📏 Conversation length: ${conversationText.length} characters`);
 
-      // Prepare conversation text (limit to 500 chars for efficiency)
+      // Prepare conversation text (limit to 1000 chars for safety - approx 250 tokens)
+      // This ensures we stay well within token limits while capturing enough context
+      const maxChars = 1000;
       let inputText = conversationText;
-      if (conversationText.length > 500) {
-        inputText = conversationText.substring(0, 500) + '...';
-        console.log(`⚠️  Truncated conversation to 500 characters`);
+      if (conversationText.length > maxChars) {
+        inputText = conversationText.substring(0, maxChars) + '...';
+        console.log(`⚠️  Truncated conversation to ${maxChars} characters`);
       }
 
       // Create the prompt for title generation
@@ -364,5 +366,142 @@ ${inputText}`;
       usage: completion.usage,
       model: model
     };
+  }
+
+  /**
+   * Generate streaming content (required by ProviderManager)
+   * @param {Object} params - Generation parameters
+   * @returns {AsyncGenerator} Streaming response chunks
+   */
+  async *generateContentStream(params) {
+    if (!this.isInitialized || !this.hasApiKey) {
+      throw new Error('Groq API key not configured');
+    }
+
+    const { contents, config } = params;
+    const {
+      model = this.defaultModel,
+      temperature = 0.7,
+      maxOutputTokens = 2048,
+      topP = 1,
+      thinkingConfig = null
+    } = config;
+
+    // Convert Gemini-style contents to OpenAI-style messages
+    const messages = this._convertContentsToMessages(contents);
+
+    // Prepare request options
+    const requestOptions = {
+      model: model,
+      messages: messages,
+      temperature: temperature,
+      max_tokens: maxOutputTokens,
+      top_p: topP,
+      stream: true
+    };
+
+    // Add reasoning parameters for reasoning models
+    if (thinkingConfig && thinkingConfig.thinkingBudget > 0) {
+      // GPT-OSS models support reasoning_effort
+      if (model.includes('gpt-oss')) {
+        // Map thinking budget to reasoning effort
+        if (thinkingConfig.thinkingBudget >= 10000) {
+          requestOptions.reasoning_effort = 'high';
+        } else if (thinkingConfig.thinkingBudget >= 5000) {
+          requestOptions.reasoning_effort = 'medium';
+        } else {
+          requestOptions.reasoning_effort = 'low';
+        }
+        requestOptions.include_reasoning = true;
+      }
+      // Qwen models support reasoning parameters
+      else if (model.includes('qwen')) {
+        requestOptions.reasoning_effort = thinkingConfig.thinkingBudget > 0 ? 'default' : 'none';
+      }
+    }
+
+    try {
+      const stream = await this.client.chat.completions.create(requestOptions);
+      
+      let fullThoughts = '';
+      let isInThinkingBlock = false;
+      
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta;
+        if (!delta) continue;
+
+        let chunkText = delta.content || '';
+        let chunkThought = '';
+
+        // Handle reasoning/thinking from GPT-OSS models
+        if (delta.reasoning) {
+          chunkThought = delta.reasoning;
+          fullThoughts += chunkThought;
+        }
+
+        // Handle Qwen <think> tags
+        if (model.includes('qwen') && chunkText) {
+          // Extract thinking content from <think> tags
+          const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+          let match;
+          while ((match = thinkRegex.exec(chunkText)) !== null) {
+            chunkThought += match[1];
+            fullThoughts += match[1];
+          }
+          // Remove <think> tags from main content
+          chunkText = chunkText.replace(/<think>[\s\S]*?<\/think>/g, '');
+        }
+
+        yield {
+          success: true,
+          text: chunkText,
+          thought: chunkThought || null,
+          isThinking: !!chunkThought,
+          hasThoughtSignatures: fullThoughts.length > 0,
+          isEndChunk: chunk.choices[0]?.finish_reason !== null,
+          usageMetadata: chunk.usage ? {
+            promptTokenCount: chunk.usage.prompt_tokens || 0,
+            candidatesTokenCount: chunk.usage.completion_tokens || 0,
+            totalTokenCount: chunk.usage.total_tokens || 0
+          } : null,
+          finishReason: chunk.choices[0]?.finish_reason || null
+        };
+      }
+    } catch (error) {
+      console.error('❌ Groq streaming error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Convert Gemini-style contents to OpenAI-style messages
+   * @private
+   */
+  _convertContentsToMessages(contents) {
+    const messages = [];
+    
+    for (const content of contents) {
+      const message = {
+        role: content.role === 'model' ? 'assistant' : content.role,
+        content: ''
+      };
+
+      // Extract text from parts
+      if (Array.isArray(content.parts)) {
+        const textParts = content.parts
+          .filter(part => part.text)
+          .map(part => part.text)
+          .join('\n');
+        message.content = textParts;
+      } else if (typeof content.parts === 'string') {
+        message.content = content.parts;
+      }
+
+      if (message.content) {
+        messages.push(message);
+      }
+    }
+
+    return messages;
   }
 }
