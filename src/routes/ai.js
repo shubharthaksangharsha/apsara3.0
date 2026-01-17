@@ -418,12 +418,17 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
     contents, 
     files,
     model, 
-    provider, 
+    provider: requestedProvider, 
     config, 
     stream 
   } = value;
 
-  // Log the userId being used for AI generation
+  // Determine the correct provider based on the model
+  // This ensures we use the right provider even if frontend sends wrong one
+  const provider = ProviderManager.getProviderForModel(model) || requestedProvider || 'google';
+  
+  console.log(`🤖 AI Generate - Model: ${model}`);
+  console.log(`🔧 AI Generate - Provider determined: ${provider} (requested: ${requestedProvider || 'default'})`);
   console.log(`🤖 AI Generate - Using userId from request body: ${userId}`);
   console.log(`🔄 AI Generate - Stream parameter: ${stream}`);
   console.log(`📋 AI Generate - Full request body:`, JSON.stringify(req.body, null, 2));

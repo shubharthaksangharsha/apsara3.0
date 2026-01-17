@@ -340,6 +340,27 @@ ${inputText}`;
   }
 
   /**
+   * Get supported models for this provider
+   * Required by ProviderManager to route models to correct provider
+   */
+  getSupportedModels() {
+    return {
+      rest: [
+        'llama-3.1-8b-instant',
+        'llama-3.3-70b-versatile',
+        'openai/gpt-oss-20b',
+        'openai/gpt-oss-120b',
+        'groq/compound',
+        'groq/compound-mini',
+        'qwen/qwen3-32b',
+        'moonshotai/kimi-k2-instruct-0905'
+      ],
+      live: [], // Groq doesn't support live API
+      embeddings: [] // Groq doesn't support embeddings yet
+    };
+  }
+
+  /**
    * Generate a chat completion (general purpose)
    */
   async generateCompletion(messages, options = {}) {
