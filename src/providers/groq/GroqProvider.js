@@ -401,13 +401,15 @@ ${inputText}`;
     };
 
     // Add reasoning parameters for reasoning models (following Groq docs)
-    if (thinkingConfig && thinkingConfig.thinkingBudget > 0) {
+    if (thinkingConfig && (thinkingConfig.thinkingBudget > 0 || thinkingConfig.thinkingBudget === -1)) {
       // GPT-OSS models: use include_reasoning and reasoning_effort
       if (model.includes('gpt-oss')) {
         requestOptions.include_reasoning = true;
         
         // Map thinking budget to reasoning effort
-        if (thinkingConfig.thinkingBudget >= 10000) {
+        if (thinkingConfig.thinkingBudget === -1) {
+          requestOptions.reasoning_effort = 'medium'; // Default for AUTO mode
+        } else if (thinkingConfig.thinkingBudget >= 10000) {
           requestOptions.reasoning_effort = 'high';
         } else if (thinkingConfig.thinkingBudget >= 5000) {
           requestOptions.reasoning_effort = 'medium';
@@ -421,7 +423,7 @@ ${inputText}`;
         requestOptions.reasoning_effort = 'default'; // Enable reasoning
       }
     } else {
-      // Disable reasoning when not requested
+      // Disable reasoning when not requested (budget is 0 or undefined)
       if (model.includes('gpt-oss')) {
         requestOptions.include_reasoning = false;
       } else if (model.includes('qwen')) {
