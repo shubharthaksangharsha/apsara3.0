@@ -15,6 +15,17 @@ const conversationSchema = new mongoose.Schema({
     type: String,
     default: 'New Conversation'
   },
+  // Embedding vector for semantic search (768 dimensions for Gemini embeddings)
+  embedding: {
+    type: [Number],
+    default: [],
+    index: false // We'll use MongoDB Atlas Vector Search index instead
+  },
+  // Last time embedding was updated
+  embeddingUpdatedAt: {
+    type: Date,
+    default: null
+  },
   type: {
     type: String,
     enum: ['rest', 'live', 'hybrid'],
@@ -247,4 +258,4 @@ conversationSchema.statics.findByUserAndType = function(userId, type) {
   return this.find({ userId, type }).sort({ updatedAt: -1 });
 };
 
-export default mongoose.model('Conversation', conversationSchema); 
+export default mongoose.model('Conversation', conversationSchema);

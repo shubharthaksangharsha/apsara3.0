@@ -23,51 +23,14 @@ const userUsageSchema = new mongoose.Schema({
       type: String,
       default: () => new Date().toISOString().split('T')[0] // YYYY-MM-DD format as string
     },
-    // Gemini models (use underscores instead of dots to avoid MongoDB nested path issues)
+    // Use underscores instead of dots to avoid MongoDB nested path issues
     'gemini-2_5-flash': {
       count: { type: Number, default: 0 },
-      limit: { type: Number, default: 20 }
+      limit: { type: Number, default: 20 } // Free: 20/day
     },
     'gemini-2_5-pro': {
       count: { type: Number, default: 0 },
-      limit: { type: Number, default: 5 }
-    },
-    // Groq Llama models
-    'llama-3_1-8b-instant': {
-      count: { type: Number, default: 0 },
-      limit: { type: Number, default: 50 }
-    },
-    'llama-3_3-70b-versatile': {
-      count: { type: Number, default: 0 },
-      limit: { type: Number, default: 30 }
-    },
-    // Groq GPT-OSS models
-    'openai/gpt-oss-20b': {
-      count: { type: Number, default: 0 },
-      limit: { type: Number, default: 20 }
-    },
-    'openai/gpt-oss-120b': {
-      count: { type: Number, default: 0 },
-      limit: { type: Number, default: 10 }
-    },
-    // Groq Compound models
-    'groq/compound': {
-      count: { type: Number, default: 0 },
-      limit: { type: Number, default: 20 }
-    },
-    'groq/compound-mini': {
-      count: { type: Number, default: 0 },
-      limit: { type: Number, default: 30 }
-    },
-    // Qwen model
-    'qwen/qwen3-32b': {
-      count: { type: Number, default: 0 },
-      limit: { type: Number, default: 20 }
-    },
-    // Kimi model
-    'moonshotai/kimi-k2-instruct-0905': {
-      count: { type: Number, default: 0 },
-      limit: { type: Number, default: 15 }
+      limit: { type: Number, default: 5 } // Free: 5/day
     }
   },
   totalUsage: {
@@ -113,46 +76,16 @@ userUsageSchema.virtual('needsDailyReset').get(function() {
 userUsageSchema.statics.getRateLimits = function(subscriptionPlan) {
   const limits = {
     guest: {
-      // Gemini models
-      'gemini-2.5-flash': { limit: 5, type: 'total' },
-      'gemini-2.5-pro': { limit: 0, type: 'total' },
-      // Groq models - limited for guests
-      'llama-3.1-8b-instant': { limit: 5, type: 'total' },
-      'llama-3.3-70b-versatile': { limit: 0, type: 'total' },
-      'openai/gpt-oss-20b': { limit: 0, type: 'total' },
-      'openai/gpt-oss-120b': { limit: 0, type: 'total' },
-      'groq/compound': { limit: 0, type: 'total' },
-      'groq/compound-mini': { limit: 0, type: 'total' },
-      'qwen/qwen3-32b': { limit: 0, type: 'total' },
-      'moonshotai/kimi-k2-instruct-0905': { limit: 0, type: 'total' }
+      'gemini-2.5-flash': { limit: 5, type: 'total' }, // 5 total messages
+      'gemini-2.5-pro': { limit: 0, type: 'total' } // No access
     },
     free: {
-      // Gemini models
       'gemini-2.5-flash': { limit: 20, type: 'daily' },
-      'gemini-2.5-pro': { limit: 5, type: 'daily' },
-      // Groq models - generous limits (Groq is fast and cheap)
-      'llama-3.1-8b-instant': { limit: 50, type: 'daily' },
-      'llama-3.3-70b-versatile': { limit: 30, type: 'daily' },
-      'openai/gpt-oss-20b': { limit: 20, type: 'daily' },
-      'openai/gpt-oss-120b': { limit: 10, type: 'daily' },
-      'groq/compound': { limit: 20, type: 'daily' },
-      'groq/compound-mini': { limit: 30, type: 'daily' },
-      'qwen/qwen3-32b': { limit: 20, type: 'daily' },
-      'moonshotai/kimi-k2-instruct-0905': { limit: 15, type: 'daily' }
+      'gemini-2.5-pro': { limit: 5, type: 'daily' }
     },
     premium: {
-      // Gemini models
       'gemini-2.5-flash': { limit: 100, type: 'daily' },
-      'gemini-2.5-pro': { limit: 50, type: 'daily' },
-      // Groq models - higher limits for premium
-      'llama-3.1-8b-instant': { limit: 200, type: 'daily' },
-      'llama-3.3-70b-versatile': { limit: 150, type: 'daily' },
-      'openai/gpt-oss-20b': { limit: 100, type: 'daily' },
-      'openai/gpt-oss-120b': { limit: 75, type: 'daily' },
-      'groq/compound': { limit: 100, type: 'daily' },
-      'groq/compound-mini': { limit: 150, type: 'daily' },
-      'qwen/qwen3-32b': { limit: 100, type: 'daily' },
-      'moonshotai/kimi-k2-instruct-0905': { limit: 75, type: 'daily' }
+      'gemini-2.5-pro': { limit: 50, type: 'daily' }
     }
   };
   

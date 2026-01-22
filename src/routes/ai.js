@@ -13,39 +13,13 @@ import File from '../models/File.js';
 const router = express.Router();
 
 /**
- * Check if a model supports thinking/reasoning
- * @param {string} model - Model name
- * @returns {boolean} True if model supports thinking
- */
-function modelSupportsThinking(model) {
-  // Only Gemini models and specific Groq reasoning models support thinking
-  const thinkingCapableModels = [
-    'gemini-2.5-pro',
-    'gemini-2.5-flash',
-    'openai/gpt-oss-20b',
-    'openai/gpt-oss-120b',
-    'qwen/qwen3-32b'
-  ];
-  
-  return thinkingCapableModels.includes(model);
-}
-
-/**
  * Validate thinking budget based on model type
  * @param {string} model - Model name
  * @param {number} thinkingBudget - Thinking budget (-1, 0, or positive)
  * @returns {Object} Validation result
  */
 function validateThinkingBudget(model, thinkingBudget) {
-  // First check: Model must support thinking for non-zero budgets
-  if (thinkingBudget !== 0 && !modelSupportsThinking(model)) {
-    return {
-      valid: false,
-      message: `${model} does not support thinking/reasoning mode`
-    };
-  }
-
-  // Dynamic thinking (-1) is always allowed for thinking-capable models
+  // Dynamic thinking (-1) is always allowed for all models
   if (thinkingBudget === -1) {
     return { valid: true };
   }
@@ -85,34 +59,16 @@ function validateThinkingBudget(model, thinkingBudget) {
  * @returns {Object} Validation result
  */
 function validateMaxOutputTokens(model, maxOutputTokens) {
-  // Groq models have a max output token limit of 8000
-  const groqModels = [
-    'llama-3.1-8b-instant',
-    'llama-3.3-70b-versatile',
-    'openai/gpt-oss-20b',
-    'openai/gpt-oss-120b',
-    'groq/compound',
-    'groq/compound-mini',
-    'qwen/qwen3-32b',
-    'moonshotai/kimi-k2-instruct-0905'
-  ];
-  
   // Gemini 2.5 models have a max output token limit of 65,536
-  const geminiModels = ['gemini-2.5-pro', 'gemini-2.5-flash'];
+  let maxLimit = 65536;
   
-  let maxLimit = 65536; // Default to Gemini limit
-  
-  if (groqModels.includes(model)) {
-    maxLimit = 8000; // Groq's recommended limit
-  } else if (geminiModels.includes(model)) {
-    maxLimit = 65536;
-  }
-  
-  if (maxOutputTokens < 1 || maxOutputTokens > maxLimit) {
-    return {
-      valid: false,
-      message: `${model} max output tokens must be between 1-${maxLimit}`
-    };
+  if (model === 'gemini-2.5-pro' || model === 'gemini-2.5-flash') {
+    if (maxOutputTokens < 1 || maxOutputTokens > maxLimit) {
+      return {
+        valid: false,
+        message: `${model} max output tokens must be between 1-${maxLimit}`
+      };
+    }
   }
 
   return { valid: true };
@@ -418,17 +374,12 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
     contents, 
     files,
     model, 
-    provider: requestedProvider, 
+    provider, 
     config, 
     stream 
   } = value;
 
-  // Determine the correct provider based on the model
-  // This ensures we use the right provider even if frontend sends wrong one
-  const provider = ProviderManager.getProviderForModel(model) || requestedProvider || 'google';
-  
-  console.log(`🤖 AI Generate - Model: ${model}`);
-  console.log(`🔧 AI Generate - Provider determined: ${provider} (requested: ${requestedProvider || 'default'})`);
+  // Log the userId being used for AI generation
   console.log(`🤖 AI Generate - Using userId from request body: ${userId}`);
   console.log(`🔄 AI Generate - Stream parameter: ${stream}`);
   console.log(`📋 AI Generate - Full request body:`, JSON.stringify(req.body, null, 2));
@@ -698,12 +649,9 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
       }
     }
 
-    // Add thinking config if specified AND model supports thinking
-    if (config.thinkingConfig && modelSupportsThinking(model)) {
+    // Add thinking config if specified
+    if (config.thinkingConfig) {
       generationConfig.thinkingConfig = config.thinkingConfig;
-      console.log(`🧠 Thinking config enabled for ${model}:`, config.thinkingConfig);
-    } else if (config.thinkingConfig && !modelSupportsThinking(model)) {
-      console.log(`⚠️  Ignoring thinking config for non-reasoning model: ${model}`);
     }
 
     // Add tools if specified
@@ -1504,12 +1452,9 @@ router.post('/edit-message', aiRateLimiter, asyncHandler(async (req, res) => {
       systemInstruction: conversation.config?.rest?.systemInstruction
     };
 
-    // Add thinking config if specified AND model supports thinking
-    if (config.thinkingConfig && modelSupportsThinking(model)) {
+    // Add thinking config if specified
+    if (config.thinkingConfig) {
       generationConfig.thinkingConfig = config.thinkingConfig;
-      console.log(`🧠 Thinking config enabled for ${model}:`, config.thinkingConfig);
-    } else if (config.thinkingConfig && !modelSupportsThinking(model)) {
-      console.log(`⚠️  Ignoring thinking config for non-reasoning model: ${model}`);
     }
 
     // Generate new AI response
@@ -1898,12 +1843,9 @@ router.post('/regenerate', aiRateLimiter, asyncHandler(async (req, res) => {
       systemInstruction: config.systemInstruction || conversation.config?.rest?.systemInstruction
     };
 
-    // Add thinking config if specified AND model supports thinking
-    if (config.thinkingConfig && modelSupportsThinking(model)) {
+    // Add thinking config if specified
+    if (config.thinkingConfig) {
       generationConfig.thinkingConfig = config.thinkingConfig;
-      console.log(`🧠 Thinking config enabled for ${model}:`, config.thinkingConfig);
-    } else if (config.thinkingConfig && !modelSupportsThinking(model)) {
-      console.log(`⚠️  Ignoring thinking config for non-reasoning model: ${model}`);
     }
 
     // Add tools if specified
@@ -2312,4 +2254,4 @@ router.post('/tts', asyncHandler(async (req, res) => {
   }
 }));
 
-export default router;
+export default router; 

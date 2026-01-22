@@ -5,6 +5,7 @@ import { asyncHandler } from '../middleware/errorHandler.js';
 import { conversationWriteRateLimiter, messageRateLimiter } from '../middleware/rateLimiter.js';
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
+import embeddingService from '../services/embeddingService.js';
 
 const router = express.Router();
 
@@ -217,6 +218,30 @@ router.post('/messages', messageRateLimiter, asyncHandler(async (req, res) => {
   
   await conversation.save();
 
+  // Update embedding asynchronously (don't block the response)
+  // Only update every 5 messages to reduce API calls
+  if (conversation.stats.messageCount % 5 === 0 || conversation.stats.messageCount <= 2) {
+    setImmediate(async () => {
+      try {
+        const messages = await Message.find({ conversationId })
+          .sort({ createdAt: -1 })
+          .limit(10);
+        
+        const searchableContent = embeddingService.createSearchableContent(conversation, messages);
+        if (searchableContent && searchableContent.trim().length > 0) {
+          const embedding = await embeddingService.generateDocumentEmbedding(searchableContent);
+          await Conversation.updateOne(
+            { conversationId },
+            { embedding, embeddingUpdatedAt: new Date() }
+          );
+          console.log(`✅ Auto-updated embedding for conversation: ${conversationId}`);
+        }
+      } catch (err) {
+        console.error(`⚠️ Failed to update embedding for ${conversationId}:`, err.message);
+      }
+    });
+  }
+
   res.status(201).json({
     success: true,
     data: {
@@ -412,6 +437,225 @@ router.delete('/:conversationId', conversationWriteRateLimiter, asyncHandler(asy
   res.json({
     success: true,
     message: 'Conversation and messages deleted successfully'
+  });
+}));
+
+/**
+ * @route POST /api/conversations/search
+ * @desc Semantic search conversations for a user
+ * @access Public
+ */
+router.post('/search', asyncHandler(async (req, res) => {
+  const { userId, query, limit = 20 } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({
+      success: false,
+      error: { message: 'userId is required' }
+    });
+  }
+
+  if (!query || query.trim().length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: { message: 'Search query is required' }
+    });
+  }
+
+  try {
+    console.log(`🔍 Semantic search for user: ${userId}, query: "${query}"`);
+    
+    // Generate embedding for the search query
+    const queryEmbedding = await embeddingService.generateQueryEmbedding(query);
+    
+    // Use MongoDB Atlas Vector Search aggregation pipeline
+    const conversations = await Conversation.aggregate([
+      {
+        $vectorSearch: {
+          index: 'conversation_embedding_index',
+          path: 'embedding',
+          queryVector: queryEmbedding,
+          numCandidates: Math.min(limit * 10, 100),
+          limit: parseInt(limit),
+          filter: {
+            userId: userId
+          }
+        }
+      },
+      {
+        $project: {
+          conversationId: 1,
+          title: 1,
+          status: 1,
+          isPinned: 1,
+          pinnedAt: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          stats: 1,
+          score: { $meta: 'vectorSearchScore' }
+        }
+      }
+    ]);
+
+    console.log(`✅ Found ${conversations.length} matching conversations`);
+
+    res.json({
+      success: true,
+      data: conversations,
+      pagination: {
+        limit: parseInt(limit),
+        total: conversations.length
+      }
+    });
+  } catch (error) {
+    console.error('❌ Semantic search error:', error);
+    
+    // Fallback to text-based search if vector search fails
+    // This handles cases where vector index isn't set up yet
+    if (error.message?.includes('$vectorSearch') || error.code === 40324) {
+      console.log('⚠️ Vector search not available, falling back to text search');
+      
+      const conversations = await Conversation.find({
+        userId,
+        $or: [
+          { title: { $regex: query, $options: 'i' } }
+        ]
+      })
+      .sort({ isPinned: -1, pinnedAt: -1, updatedAt: -1 })
+      .limit(parseInt(limit))
+      .select('conversationId title status isPinned pinnedAt createdAt updatedAt stats');
+
+      return res.json({
+        success: true,
+        data: conversations,
+        pagination: {
+          limit: parseInt(limit),
+          total: conversations.length
+        },
+        fallback: true
+      });
+    }
+    
+    throw error;
+  }
+}));
+
+/**
+ * @route POST /api/conversations/:conversationId/embedding
+ * @desc Generate/update embedding for a conversation
+ * @access Public
+ */
+router.post('/:conversationId/embedding', asyncHandler(async (req, res) => {
+  const { conversationId } = req.params;
+
+  const conversation = await Conversation.findOne({ conversationId });
+  if (!conversation) {
+    return res.status(404).json({
+      success: false,
+      error: { message: 'Conversation not found' }
+    });
+  }
+
+  // Get recent messages for this conversation
+  const messages = await Message.find({ conversationId })
+    .sort({ createdAt: -1 })
+    .limit(10);
+
+  // Create searchable content
+  const searchableContent = embeddingService.createSearchableContent(conversation, messages);
+  
+  if (!searchableContent || searchableContent.trim().length === 0) {
+    return res.json({
+      success: true,
+      message: 'No content to embed yet',
+      data: { conversationId }
+    });
+  }
+
+  // Generate embedding
+  const embedding = await embeddingService.generateDocumentEmbedding(searchableContent);
+
+  // Update conversation with embedding
+  conversation.embedding = embedding;
+  conversation.embeddingUpdatedAt = new Date();
+  await conversation.save();
+
+  console.log(`✅ Updated embedding for conversation: ${conversationId}`);
+
+  res.json({
+    success: true,
+    message: 'Embedding updated successfully',
+    data: {
+      conversationId,
+      embeddingDimensions: embedding.length,
+      embeddingUpdatedAt: conversation.embeddingUpdatedAt
+    }
+  });
+}));
+
+/**
+ * @route POST /api/conversations/embeddings/batch
+ * @desc Generate embeddings for all conversations of a user (batch operation)
+ * @access Public
+ */
+router.post('/embeddings/batch', asyncHandler(async (req, res) => {
+  const { userId, limit = 50 } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({
+      success: false,
+      error: { message: 'userId is required' }
+    });
+  }
+
+  console.log(`🔄 Batch embedding generation for user: ${userId}`);
+
+  // Find conversations without embeddings or with stale embeddings
+  const conversations = await Conversation.find({
+    userId,
+    $or: [
+      { embedding: { $exists: false } },
+      { embedding: { $size: 0 } },
+      { embeddingUpdatedAt: { $lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } } // Older than 7 days
+    ]
+  }).limit(parseInt(limit));
+
+  console.log(`📊 Found ${conversations.length} conversations needing embeddings`);
+
+  let updated = 0;
+  let errors = 0;
+
+  for (const conversation of conversations) {
+    try {
+      const messages = await Message.find({ conversationId: conversation.conversationId })
+        .sort({ createdAt: -1 })
+        .limit(10);
+
+      const searchableContent = embeddingService.createSearchableContent(conversation, messages);
+      
+      if (searchableContent && searchableContent.trim().length > 0) {
+        const embedding = await embeddingService.generateDocumentEmbedding(searchableContent);
+        conversation.embedding = embedding;
+        conversation.embeddingUpdatedAt = new Date();
+        await conversation.save();
+        updated++;
+      }
+    } catch (error) {
+      console.error(`❌ Error embedding conversation ${conversation.conversationId}:`, error.message);
+      errors++;
+    }
+  }
+
+  console.log(`✅ Batch embedding complete: ${updated} updated, ${errors} errors`);
+
+  res.json({
+    success: true,
+    message: 'Batch embedding generation complete',
+    data: {
+      processed: conversations.length,
+      updated,
+      errors
+    }
   });
 }));
 
