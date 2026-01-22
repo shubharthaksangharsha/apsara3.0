@@ -6,6 +6,7 @@
  * 
  * Solution: This script resets the dailyUsage data to use the correct
  * field names with underscores: 'gemini-2_5-flash'
+ * It also removes the old nested 'gemini-2' field if present.
  * 
  * Run with: node scripts/fix-usage-data.js
  */
@@ -57,21 +58,26 @@ async function fixUsageData() {
         { 
           $set: { 
             dailyUsage: correctedDailyUsage 
-          },
-          // Remove the incorrectly nested fields if they exist
-          $unset: {
-            'dailyUsage.gemini-2': 1
           }
         }
       );
-
       console.log('   ✅ Fixed dailyUsage:', JSON.stringify(correctedDailyUsage, null, 2));
+
+      // Remove the old nested field if it exists
+      if (doc.dailyUsage && doc.dailyUsage['gemini-2']) {
+        await usageCollection.updateOne(
+          { _id: doc._id },
+          { $unset: { 'dailyUsage.gemini-2': "" } }
+        );
+        console.log('   🧹 Removed old nested field: dailyUsage.gemini-2');
+      }
     }
 
     console.log('\n🎉 Migration complete!');
     console.log('📋 Summary:');
     console.log(`   - Fixed ${usageDocs.length} usage documents`);
     console.log('   - Changed field names from gemini-2.5-* to gemini-2_5-*');
+    console.log('   - Removed old nested fields');
     console.log('   - Reset all daily counts to 0');
 
   } catch (error) {
