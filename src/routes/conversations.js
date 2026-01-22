@@ -446,7 +446,7 @@ router.delete('/:conversationId', conversationWriteRateLimiter, asyncHandler(asy
  * @access Public
  */
 router.post('/search', asyncHandler(async (req, res) => {
-  const { userId, query, limit = 20 } = req.body;
+  const { userId, query, limit = 20, exactMatch = true } = req.body;
 
   if (!userId) {
     return res.status(400).json({
@@ -463,20 +463,23 @@ router.post('/search', asyncHandler(async (req, res) => {
   }
 
   try {
-    console.log(`🔍 Semantic search for user: ${userId}, query: "${query}"`);
+    console.log(`🔍 Semantic search for user: ${userId}, query: "${query}", exactMatch: ${exactMatch}`);
     
     // Generate embedding for the search query
     const queryEmbedding = await embeddingService.generateQueryEmbedding(query);
     
     // Use MongoDB Atlas Vector Search aggregation pipeline
+    // Get more results than requested if we need to filter by exact match
+    const searchLimit = exactMatch ? Math.min(limit * 5, 100) : parseInt(limit);
+    
     const conversations = await Conversation.aggregate([
       {
         $vectorSearch: {
           index: 'conversation_embedding_index',
           path: 'embedding',
           queryVector: queryEmbedding,
-          numCandidates: Math.min(limit * 10, 100),
-          limit: parseInt(limit),
+          numCandidates: Math.min(searchLimit * 10, 100),
+          limit: searchLimit,
           filter: {
             userId: userId
           }
@@ -497,14 +500,48 @@ router.post('/search', asyncHandler(async (req, res) => {
       }
     ]);
 
-    console.log(`✅ Found ${conversations.length} matching conversations`);
+    console.log(`✅ Vector search returned ${conversations.length} semantically similar conversations`);
+
+    // If exactMatch is enabled, filter to only conversations that contain the search term
+    let filteredConversations = conversations;
+    if (exactMatch && conversations.length > 0) {
+      // Get conversation IDs
+      const conversationIds = conversations.map(c => c.conversationId);
+      
+      // Find which conversations have messages containing the search query
+      const matchingMessages = await Message.aggregate([
+        {
+          $match: {
+            conversationId: { $in: conversationIds },
+            'content.text': { $regex: query, $options: 'i' }
+          }
+        },
+        {
+          $group: {
+            _id: '$conversationId',
+            matchCount: { $sum: 1 }
+          }
+        }
+      ]);
+      
+      const conversationsWithMatches = new Set(matchingMessages.map(m => m._id));
+      console.log(`📝 Found ${conversationsWithMatches.size} conversations with actual text matches`);
+      
+      // Filter to only keep conversations that have actual text matches
+      filteredConversations = conversations.filter(c => conversationsWithMatches.has(c.conversationId));
+      
+      // Limit to requested number
+      filteredConversations = filteredConversations.slice(0, parseInt(limit));
+      
+      console.log(`✅ Returning ${filteredConversations.length} conversations with exact matches`);
+    }
 
     res.json({
       success: true,
-      data: conversations,
+      data: filteredConversations,
       pagination: {
         limit: parseInt(limit),
-        total: conversations.length
+        total: filteredConversations.length
       }
     });
   } catch (error) {
@@ -515,11 +552,36 @@ router.post('/search', asyncHandler(async (req, res) => {
     if (error.message?.includes('$vectorSearch') || error.code === 40324) {
       console.log('⚠️ Vector search not available, falling back to text search');
       
-      const conversations = await Conversation.find({
+      // For text fallback, search in both conversation titles AND message content
+      const conversationsByTitle = await Conversation.find({
         userId,
-        $or: [
-          { title: { $regex: query, $options: 'i' } }
-        ]
+        title: { $regex: query, $options: 'i' }
+      })
+      .sort({ isPinned: -1, pinnedAt: -1, updatedAt: -1 })
+      .limit(parseInt(limit))
+      .select('conversationId title status isPinned pinnedAt createdAt updatedAt stats');
+      
+      // Also search messages
+      const matchingMessages = await Message.aggregate([
+        {
+          $match: {
+            'content.text': { $regex: query, $options: 'i' }
+          }
+        },
+        {
+          $group: {
+            _id: '$conversationId'
+          }
+        }
+      ]);
+      
+      const messageConversationIds = matchingMessages.map(m => m._id);
+      const titleConversationIds = conversationsByTitle.map(c => c.conversationId);
+      const allMatchingIds = [...new Set([...titleConversationIds, ...messageConversationIds])];
+      
+      const allConversations = await Conversation.find({
+        userId,
+        conversationId: { $in: allMatchingIds }
       })
       .sort({ isPinned: -1, pinnedAt: -1, updatedAt: -1 })
       .limit(parseInt(limit))
@@ -527,10 +589,10 @@ router.post('/search', asyncHandler(async (req, res) => {
 
       return res.json({
         success: true,
-        data: conversations,
+        data: allConversations,
         pagination: {
           limit: parseInt(limit),
-          total: conversations.length
+          total: allConversations.length
         },
         fallback: true
       });
