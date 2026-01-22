@@ -5,9 +5,26 @@ dotenv.config();
 
 class EmbeddingService {
   constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    // Check all possible API key environment variable names
+    const apiKey = process.env.GEMINI_API_KEY || 
+                   process.env.GOOGLE_API_KEY || 
+                   process.env.GOOGLE_GEMINI_API_KEY;
+    
+    if (!apiKey) {
+      console.error('❌ No Gemini/Google API key found in environment variables');
+      console.error('   Set GEMINI_API_KEY, GOOGLE_API_KEY, or GOOGLE_GEMINI_API_KEY in your .env file');
+    } else {
+      console.log(`✅ EmbeddingService: Found API key (length: ${apiKey.length})`);
+    }
+    
+    // Initialize with explicit API key - this prevents the library from 
+    // trying to use Google Cloud Application Default Credentials
+    this.ai = new GoogleGenAI({ apiKey: apiKey });
     this.model = 'gemini-embedding-exp-03-07';
-    this.dimensions = 768; // Default dimensions for the embedding model
+    this.dimensions = 3072; // gemini-embedding-exp-03-07 outputs 3072 dimensions
+    this.apiKey = apiKey;
+    
+    console.log(`✅ EmbeddingService initialized with model: ${this.model}`);
   }
 
   /**
@@ -18,6 +35,10 @@ class EmbeddingService {
    */
   async generateEmbedding(text, taskType = 'RETRIEVAL_DOCUMENT') {
     try {
+      if (!this.apiKey) {
+        throw new Error('No API key configured for embedding service');
+      }
+      
       if (!text || text.trim().length === 0) {
         console.warn('⚠️ Empty text provided for embedding, using placeholder');
         text = 'empty content';
