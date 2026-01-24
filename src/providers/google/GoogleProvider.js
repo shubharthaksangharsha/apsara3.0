@@ -1,409 +1,447 @@
-import { GoogleGenAI, Modality, createUserContent, createPartFromUri } from '@google/genai';
-import { BaseProvider } from '../base/BaseProvider.js';
-import dotenv from 'dotenv';
+  import { GoogleGenAI, Modality, createUserContent, createPartFromUri } from '@google/genai';
+  import { BaseProvider } from '../base/BaseProvider.js';
+  import dotenv from 'dotenv';
 
-dotenv.config();
-
-/**
- * Google Gemini AI Provider
- * Implements the BaseProvider interface for Google's Gemini models
- */
-export class GoogleProvider extends BaseProvider {
-  constructor(config = {}) {
-    super(config);
-    this.name = 'google';
-    this.client = null;
-    this.apiKey = config.apiKey || process.env.GOOGLE_GEMINI_API_KEY;
-  }
+  dotenv.config();
 
   /**
-   * Initialize the Google provider
+   * Google Gemini AI Provider
+   * Implements the BaseProvider interface for Google's Gemini models
    */
-  async initialize() {
-    if (!this.apiKey) {
-      throw new Error('Google API key is required');
+  export class GoogleProvider extends BaseProvider {
+    constructor(config = {}) {
+      super(config);
+      this.name = 'google';
+      this.client = null;
+      this.apiKey = config.apiKey || process.env.GOOGLE_GEMINI_API_KEY;
     }
 
-    try {
-      this.client = new GoogleGenAI({ apiKey: this.apiKey });
-      this.isInitialized = true;
-      console.log('✅ Google Provider initialized');
-    } catch (error) {
-      throw new Error(`Failed to initialize Google provider: ${error.message}`);
+    /**
+     * Initialize the Google provider
+     */
+    async initialize() {
+      if (!this.apiKey) {
+        throw new Error('Google API key is required');
+      }
+
+      try {
+        this.client = new GoogleGenAI({ apiKey: this.apiKey });
+        this.isInitialized = true;
+        console.log('✅ Google Provider initialized');
+      } catch (error) {
+        throw new Error(`Failed to initialize Google provider: ${error.message}`);
+      }
     }
-  }
 
-  /**
-   * Generate content using Gemini models
-   */
-  async generateContent(params) {
-    this.validateInitialization();
+    /**
+     * Generate content using Gemini models
+     */
+    async generateContent(params) {
+      this.validateInitialization();
 
-    const { model = 'gemini-2.5-flash', contents, config = {} } = params;
-    
-    try {
-      // Normalize and prepare the request
-      const normalizedConfig = this.normalizeConfig(config);
-      const requestParams = {
-        model,
-        contents: this.normalizeContent(contents),
-        config: {
-          ...normalizedConfig,
-          ...(config.systemInstruction && { systemInstruction: config.systemInstruction }),
-          ...(config.thinkingConfig && { thinkingConfig: config.thinkingConfig }),
-          ...(config.tools && { tools: config.tools }),
-
-        }
-      };
-
-      const response = await this.client.models.generateContent(requestParams);
+      const { model = 'gemini-2.5-flash', contents, config = {} } = params;
       
-      // Process thoughts in non-streaming response
-      let thoughts = null;
-      let hasThoughtSignatures = false;
-      
-      if (response.candidates && response.candidates.length > 0) {
-        const candidate = response.candidates[0];
-        if (candidate.content && candidate.content.parts) {
-          for (const part of candidate.content.parts) {
-            // Check for thought parts
-            if (part.thought && part.text) {
-              thoughts = part.text;
-            }
-            // Check for thought signatures
-            if (part.thoughtSignature) {
-              hasThoughtSignatures = true;
-            }
+      try {
+        // Normalize and prepare the request
+        const normalizedConfig = this.normalizeConfig(config);
+        const requestParams = {
+          model,
+          contents: this.normalizeContent(contents),
+          config: {
+            ...normalizedConfig,
+            ...(config.systemInstruction && { systemInstruction: config.systemInstruction }),
+            ...(config.thinkingConfig && { thinkingConfig: config.thinkingConfig }),
+            ...(config.tools && { tools: config.tools }),
+
           }
-        }
-      }
-      
-      return {
-        success: true,
-        provider: this.name,
-        model,
-        text: response.text,
-        thoughts,
-        hasThoughtSignatures,
-        response: response,
-        usageMetadata: response.usageMetadata,
-        finishReason: response.finishReason
-      };
-    } catch (error) {
-      console.error('Google Provider Error:', error);
-      throw this.createProviderError(error);
-    }
-  }
+        };
 
-  /**
-   * Generate streaming content
-   */
-  async *generateContentStream(params) {
-    this.validateInitialization();
-
-    const { model = 'gemini-2.5-flash', contents, config = {} } = params;
-    
-    try {
-      const normalizedConfig = this.normalizeConfig(config);
-      const requestParams = {
-        model,
-        contents: this.normalizeContent(contents),
-        config: {
-          ...normalizedConfig,
-          ...(config.systemInstruction && { systemInstruction: config.systemInstruction }),
-          ...(config.thinkingConfig && { thinkingConfig: config.thinkingConfig }),
-          ...(config.tools && { tools: config.tools }),
-
-        }
-      };
-
-      const stream = await this.client.models.generateContentStream(requestParams);
-      
-      let fullResponse = '';
-      let fullThoughts = '';
-      
-      for await (const chunk of stream) {
-        // Process the chunk to extract thoughts and content
-        const processedChunk = this.processStreamChunk(chunk);
+        const response = await this.client.models.generateContent(requestParams);
         
-        // Skip null/empty chunks
-        if (!processedChunk) {
-          console.log(`⏭️ Skipping empty chunk`);
-          continue;
-        }
+        // Process thoughts in non-streaming response
+        let thoughts = null;
+        let hasThoughtSignatures = false;
         
-        // Accumulate response for logging
-        if (processedChunk.text) {
-          fullResponse += processedChunk.text;
-        }
-        if (processedChunk.thought) {
-          fullThoughts += processedChunk.thought;
-        }
-        
-        // Always yield chunks with content or end chunks
-        if (processedChunk.text || processedChunk.thought || processedChunk.isEndChunk) {
-          console.log(`📤 Yielding chunk - Model: ${model}, Text: "${processedChunk.text || ''}", Thought: "${processedChunk.thought || ''}", Thinking: ${processedChunk.isThinking}, EndChunk: ${processedChunk.isEndChunk || false}, Signatures: ${processedChunk.hasThoughtSignatures || false}`);
-          
-          yield {
-            success: true,
-            provider: this.name,
-            model,
-            text: processedChunk.text || '',
-            thought: processedChunk.thought || null,
-            isThinking: processedChunk.isThinking || false,
-            hasThoughtSignatures: processedChunk.hasThoughtSignatures || false,
-            isEndChunk: processedChunk.isEndChunk || false,
-            chunk: chunk,
-            usageMetadata: chunk.usageMetadata || processedChunk.usageMetadata,
-            finishReason: chunk.finishReason
-          };
-        } else {
-          console.log(`⏭️ Skipping chunk with no content`);
-        }
-      }
-      
-      // Log final response
-      console.log(`✅ Final Response - Model: ${model}`);
-      console.log(`📝 Generated Text: "${fullResponse}"`);
-      if (fullThoughts) {
-        console.log(`🧠 Thoughts: "${fullThoughts}"`);
-      }
-    } catch (error) {
-      console.error('Google Provider Streaming Error:', error);
-      throw this.createProviderError(error);
-    }
-  }
-
-  /**
-   * Create a live session for real-time interaction
-   */
-  async createLiveSession(params) {
-    this.validateInitialization();
-
-    const { model = 'gemini-2.5-flash-native-audio-preview-09-2025', config = {}, callbacks = {} } = params;
-
-    try {
-      // Sanitize config to only include valid Live API parameters
-      const validConfig = {};
-      
-      // Add only essential configuration properties
-      if (config.responseModalities) {
-        validConfig.responseModalities = config.responseModalities;
-      }
-      
-      if (config.speechConfig) {
-        // Keep the proper nested speechConfig structure as required by Gemini Live API
-        const speechConfig = {};
-        
-        // Handle voice configuration - keep the nested structure
-        if (config.speechConfig.voiceConfig?.prebuiltVoiceConfig?.voiceName) {
-          speechConfig.voiceConfig = {
-            prebuiltVoiceConfig: {
-              voiceName: config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName
-            }
-          };
-        }
-        
-        // Handle language configuration
-        if (config.speechConfig.languageCode) {
-          speechConfig.languageCode = config.speechConfig.languageCode;
-        }
-        
-        if (Object.keys(speechConfig).length > 0) {
-          validConfig.speechConfig = speechConfig;
-        }
-      }
-      
-      // Include outputAudioTranscription if present (even if empty object - this enables it)
-      if (config.outputAudioTranscription !== undefined) {
-        validConfig.outputAudioTranscription = config.outputAudioTranscription;
-      }
-      
-      // Include inputAudioTranscription if present (even if empty object - this enables it)
-      if (config.inputAudioTranscription !== undefined) {
-        validConfig.inputAudioTranscription = config.inputAudioTranscription;
-      }
-      
-      // Only include other properties if they're actually needed
-      if (config.systemInstruction) validConfig.systemInstruction = config.systemInstruction;
-      if (config.tools && Array.isArray(config.tools) && config.tools.length > 0) {
-        validConfig.tools = config.tools;
-      }
-      
-      console.log(`🔧 Final validConfig being sent to Gemini Live API:`, JSON.stringify(validConfig, null, 2));
-      console.log(`🔧 Model being used:`, model);
-      console.log(`🔧 Full connect parameters:`, JSON.stringify({ model, config: validConfig }, null, 2));
-      
-      console.log(`⏳ Attempting to connect to Gemini Live API...`);
-      const connectStartTime = Date.now();
-      
-      const session = await this.client.live.connect({
-        model,
-        config: validConfig,
-        callbacks: {
-          onopen: () => {
-            console.log(`🟢 Google Live session OPENED (took ${Date.now() - connectStartTime}ms)`);
-            if (callbacks.onopen) callbacks.onopen();
-          },
-          onmessage: (message) => {
-            // Better logging - show actual message content type and summary
-            const sc = message?.serverContent;
-            let msgType = 'data';
-            let details = [];
-            
-            // Check for audio data
-            if (message?.data) {
-              msgType = 'audio';
-              details.push(`${message.data.length} bytes`);
-            }
-            
-            // Check serverContent types
-            if (sc) {
-              if (sc.inputTranscription?.text) {
-                msgType = 'input_transcription';
-                details.push(`"${sc.inputTranscription.text.slice(0, 30)}..."`);
-              } else if (sc.outputTranscription?.text) {
-                msgType = 'output_transcription';
-                details.push(`"${sc.outputTranscription.text.slice(0, 30)}..."`);
-              } else if (sc.modelTurn?.parts) {
-                const parts = sc.modelTurn.parts;
-                if (parts[0]?.inlineData) {
-                  msgType = 'audio_chunk';
-                  details.push(`${parts.length} parts`);
-                } else if (parts[0]?.text) {
-                  msgType = 'text_response';
-                  details.push(`"${parts[0].text.slice(0, 30)}..."`);
-                }
-              } else if (sc.turnComplete) {
-                msgType = 'turn_complete';
-              } else if (sc.generationComplete) {
-                msgType = 'generation_complete';
-              } else if (sc.interrupted) {
-                msgType = 'interrupted';
+        if (response.candidates && response.candidates.length > 0) {
+          const candidate = response.candidates[0];
+          if (candidate.content && candidate.content.parts) {
+            for (const part of candidate.content.parts) {
+              // Check for thought parts
+              if (part.thought && part.text) {
+                thoughts = part.text;
+              }
+              // Check for thought signatures
+              if (part.thoughtSignature) {
+                hasThoughtSignatures = true;
               }
             }
-            
-            // Check for tool calls
-            if (message?.toolCall) {
-              msgType = 'tool_call';
-              const fnNames = message.toolCall.functionCalls?.map(fc => fc.name) || [];
-              details.push(fnNames.join(', '));
-            }
-            
-            // Check for goAway
-            if (message?.goAway) {
-              msgType = 'go_away';
-              details.push(`timeLeft: ${message.goAway.timeLeft}`);
-            }
-            
-            const detailStr = details.length > 0 ? ` [${details.join(', ')}]` : '';
-            console.log(`📨 Live: ${msgType}${detailStr}`);
-            if (callbacks.onmessage) callbacks.onmessage(message);
-          },
-          onerror: (error) => {
-            console.error(`🔴 Google Live session ERROR:`, error);
-            if (callbacks.onerror) callbacks.onerror(error);
-          },
-          onclose: (reason) => {
-            console.log(`🔴 Google Live session CLOSED:`, reason);
-            if (callbacks.onclose) callbacks.onclose(reason);
           }
         }
-      });
+        
+        return {
+          success: true,
+          provider: this.name,
+          model,
+          text: response.text,
+          thoughts,
+          hasThoughtSignatures,
+          response: response,
+          usageMetadata: response.usageMetadata,
+          finishReason: response.finishReason
+        };
+      } catch (error) {
+        console.error('Google Provider Error:', error);
+        throw this.createProviderError(error);
+      }
+    }
+
+    /**
+     * Generate streaming content
+     */
+    async *generateContentStream(params) {
+      this.validateInitialization();
+
+      const { model = 'gemini-2.5-flash', contents, config = {} } = params;
       
-      console.log(`✅ Gemini Live connect() returned (took ${Date.now() - connectStartTime}ms)`);
+      try {
+        const normalizedConfig = this.normalizeConfig(config);
+        const requestParams = {
+          model,
+          contents: this.normalizeContent(contents),
+          config: {
+            ...normalizedConfig,
+            ...(config.systemInstruction && { systemInstruction: config.systemInstruction }),
+            ...(config.thinkingConfig && { thinkingConfig: config.thinkingConfig }),
+            ...(config.tools && { tools: config.tools }),
 
-      return {
-        success: true,
-        provider: this.name,
-        model,
-        session,
-        sessionId: session.id || Date.now().toString()
-      };
-    } catch (error) {
-      console.error('❌ Google Live Session Error:', error?.message || error);
-      console.error('❌ Full error:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
-      throw this.createProviderError(error);
-    }
-  }
+          }
+        };
 
-  /**
-   * Generate embeddings
-   */
-  async generateEmbeddings(params) {
-    this.validateInitialization();
-
-    const { model = 'gemini-embedding-exp-03-07', contents, config = {} } = params;
-
-    try {
-      const response = await this.client.models.embedContent({
-        model,
-        contents: this.normalizeContent(contents),
-        config: {
-          ...(config.taskType && { taskType: config.taskType }),
-          ...config
+        const stream = await this.client.models.generateContentStream(requestParams);
+        
+        let fullResponse = '';
+        let fullThoughts = '';
+        
+        for await (const chunk of stream) {
+          // Process the chunk to extract thoughts and content
+          const processedChunk = this.processStreamChunk(chunk);
+          
+          // Skip null/empty chunks
+          if (!processedChunk) {
+            console.log(`⏭️ Skipping empty chunk`);
+            continue;
+          }
+          
+          // Accumulate response for logging
+          if (processedChunk.text) {
+            fullResponse += processedChunk.text;
+          }
+          if (processedChunk.thought) {
+            fullThoughts += processedChunk.thought;
+          }
+          
+          // Always yield chunks with content or end chunks
+          if (processedChunk.text || processedChunk.thought || processedChunk.isEndChunk) {
+            console.log(`📤 Yielding chunk - Model: ${model}, Text: "${processedChunk.text || ''}", Thought: "${processedChunk.thought || ''}", Thinking: ${processedChunk.isThinking}, EndChunk: ${processedChunk.isEndChunk || false}, Signatures: ${processedChunk.hasThoughtSignatures || false}`);
+            
+            yield {
+              success: true,
+              provider: this.name,
+              model,
+              text: processedChunk.text || '',
+              thought: processedChunk.thought || null,
+              isThinking: processedChunk.isThinking || false,
+              hasThoughtSignatures: processedChunk.hasThoughtSignatures || false,
+              isEndChunk: processedChunk.isEndChunk || false,
+              chunk: chunk,
+              usageMetadata: chunk.usageMetadata || processedChunk.usageMetadata,
+              finishReason: chunk.finishReason
+            };
+          } else {
+            console.log(`⏭️ Skipping chunk with no content`);
+          }
         }
-      });
-
-      return {
-        success: true,
-        provider: this.name,
-        model,
-        embeddings: response.embeddings,
-        usageMetadata: response.usageMetadata
-      };
-    } catch (error) {
-      console.error('Google Embeddings Error:', error);
-      throw this.createProviderError(error);
-    }
-  }
-
-  /**
-   * Upload a file
-   */
-  async uploadFile(params) {
-    this.validateInitialization();
-
-    const { file, config = {} } = params;
-
-    try {
-      const uploadResult = await this.client.files.upload({
-        file,
-        config: {
-          mimeType: config.mimeType,
-          displayName: config.displayName,
-          ...config
+        
+        // Log final response
+        console.log(`✅ Final Response - Model: ${model}`);
+        console.log(`📝 Generated Text: "${fullResponse}"`);
+        if (fullThoughts) {
+          console.log(`🧠 Thoughts: "${fullThoughts}"`);
         }
-      });
-
-      return {
-        success: true,
-        provider: this.name,
-        file: uploadResult,
-        uri: uploadResult.uri,
-        name: uploadResult.name,
-        mimeType: uploadResult.mimeType
-      };
-    } catch (error) {
-      console.error('Google File Upload Error:', error);
-      throw this.createProviderError(error);
+      } catch (error) {
+        console.error('Google Provider Streaming Error:', error);
+        throw this.createProviderError(error);
+      }
     }
-  }
 
-  /**
-   * Get file metadata
-   */
-  async getFile(name) {
-    this.validateInitialization();
+    /**
+     * Create a live session for real-time interaction
+     */
+    async createLiveSession(params) {
+      this.validateInitialization();
 
-    try {
-      const file = await this.client.files.get({ name });
-      return {
-        success: true,
-        provider: this.name,
-        file
-      };
-    } catch (error) {
+      const { model = 'gemini-2.5-flash-native-audio-preview-09-2025', config = {}, callbacks = {} } = params;
+
+      try {
+        // Sanitize config to only include valid Live API parameters
+        const validConfig = {};
+        
+        // Add only essential configuration properties
+        if (config.responseModalities) {
+          validConfig.responseModalities = config.responseModalities;
+        }
+        
+        if (config.speechConfig) {
+          // Keep the proper nested speechConfig structure as required by Gemini Live API
+          const speechConfig = {};
+          
+          // Handle voice configuration - keep the nested structure
+          if (config.speechConfig.voiceConfig?.prebuiltVoiceConfig?.voiceName) {
+            speechConfig.voiceConfig = {
+              prebuiltVoiceConfig: {
+                voiceName: config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName
+              }
+            };
+          }
+          
+          // Handle language configuration
+          if (config.speechConfig.languageCode) {
+            speechConfig.languageCode = config.speechConfig.languageCode;
+          }
+          
+          if (Object.keys(speechConfig).length > 0) {
+            validConfig.speechConfig = speechConfig;
+          }
+        }
+        
+        // Include outputAudioTranscription if present (even if empty object - this enables it)
+        if (config.outputAudioTranscription !== undefined) {
+          validConfig.outputAudioTranscription = config.outputAudioTranscription;
+        }
+        
+        // Include inputAudioTranscription if present (even if empty object - this enables it)
+        if (config.inputAudioTranscription !== undefined) {
+          validConfig.inputAudioTranscription = config.inputAudioTranscription;
+        }
+        
+        // Only include other properties if they're actually needed
+        if (config.systemInstruction) validConfig.systemInstruction = config.systemInstruction;
+        if (config.tools && Array.isArray(config.tools) && config.tools.length > 0) {
+          validConfig.tools = config.tools;
+        }
+        
+        console.log(`🔧 Final validConfig being sent to Gemini Live API:`, JSON.stringify(validConfig, null, 2));
+        console.log(`🔧 Model being used:`, model);
+        console.log(`🔧 Full connect parameters:`, JSON.stringify({ model, config: validConfig }, null, 2));
+        
+        console.log(`⏳ Attempting to connect to Gemini Live API...`);
+        const connectStartTime = Date.now();
+        
+        const session = await this.client.live.connect({
+          model,
+          config: validConfig,
+          callbacks: {
+            onopen: () => {
+              console.log(`🟢 Google Live session OPENED (took ${Date.now() - connectStartTime}ms)`);
+              if (callbacks.onopen) callbacks.onopen();
+            },
+            onmessage: (message) => {
+              // Better logging - show actual message content type and summary
+              const sc = message?.serverContent;
+              let msgType = 'data';
+              let details = [];
+              
+              // Check for audio data
+              if (message?.data) {
+                msgType = 'audio';
+                details.push(`${message.data.length} bytes`);
+              }
+              
+              // Check serverContent types
+              if (sc) {
+                if (sc.inputTranscription?.text) {
+                  msgType = 'input_transcription';
+                  details.push(`"${sc.inputTranscription.text}"`);
+                } else if (sc.outputTranscription?.text) {
+                  msgType = 'output_transcription';
+                  details.push(`"${sc.outputTranscription.text}"`);
+                } else if (sc.modelTurn?.parts) {
+                  const parts = sc.modelTurn.parts;
+                  let hasAudio = false;
+                  let hasText = false;
+                  let hasCode = false;
+                  let hasCodeResult = false;
+                  
+                  for (const part of parts) {
+                    // Check for executable code (code execution tool)
+                    if (part.executableCode) {
+                      hasCode = true;
+                      console.log(`💻 Live: executableCode\n${part.executableCode.code}`);
+                    }
+                    // Check for code execution result
+                    else if (part.codeExecutionResult) {
+                      hasCodeResult = true;
+                      console.log(`📊 Live: codeExecutionResult\n${part.codeExecutionResult.output}`);
+                    }
+                    // Check for audio inline data
+                    else if (part.inlineData) {
+                      hasAudio = true;
+                    }
+                    // Check for text
+                    else if (part.text) {
+                      hasText = true;
+                      // Show full text for text responses
+                      console.log(`📝 Live: text_response\n${part.text}`);
+                    }
+                  }
+                  
+                  // Set message type based on what we found
+                  if (hasCode) {
+                    msgType = 'executable_code';
+                    details.push(`${parts.length} parts`);
+                  } else if (hasCodeResult) {
+                    msgType = 'code_execution_result';
+                    details.push(`${parts.length} parts`);
+                  } else if (hasAudio) {
+                    msgType = 'audio_chunk';
+                    details.push(`${parts.length} parts`);
+                  } else if (hasText) {
+                    msgType = 'text_response';
+                    // Don't add details - already logged full text above
+                  }
+                } else if (sc.turnComplete) {
+                  msgType = 'turn_complete';
+                } else if (sc.generationComplete) {
+                  msgType = 'generation_complete';
+                } else if (sc.interrupted) {
+                  msgType = 'interrupted';
+                }
+              }
+              
+              // Check for tool calls
+              if (message?.toolCall) {
+                msgType = 'tool_call';
+                const fnNames = message.toolCall.functionCalls?.map(fc => fc.name) || [];
+                details.push(fnNames.join(', '));
+              }
+              
+              // Check for goAway
+              if (message?.goAway) {
+                msgType = 'go_away';
+                details.push(`timeLeft: ${message.goAway.timeLeft}`);
+              }
+              
+              const detailStr = details.length > 0 ? ` [${details.join(', ')}]` : '';
+              // Only log the summary line if we haven't already logged details
+              if (msgType !== 'text_response' && msgType !== 'executable_code' && msgType !== 'code_execution_result') {
+                console.log(`📨 Live: ${msgType}${detailStr}`);
+              }
+              if (callbacks.onmessage) callbacks.onmessage(message);
+            },
+            onerror: (error) => {
+              console.error(`🔴 Google Live session ERROR:`, error);
+              if (callbacks.onerror) callbacks.onerror(error);
+            },
+            onclose: (reason) => {
+              console.log(`🔴 Google Live session CLOSED:`, reason);
+              if (callbacks.onclose) callbacks.onclose(reason);
+            }
+          }
+        });
+        
+        console.log(`✅ Gemini Live connect() returned (took ${Date.now() - connectStartTime}ms)`);
+
+        return {
+          success: true,
+          provider: this.name,
+          model,
+          session,
+          sessionId: session.id || Date.now().toString()
+        };
+      } catch (error) {
+        console.error('❌ Google Live Session Error:', error?.message || error);
+        console.error('❌ Full error:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+        throw this.createProviderError(error);
+      }
+    }
+
+    /**
+     * Generate embeddings
+     */
+    async generateEmbeddings(params) {
+      this.validateInitialization();
+
+      const { model = 'gemini-embedding-exp-03-07', contents, config = {} } = params;
+
+      try {
+        const response = await this.client.models.embedContent({
+          model,
+          contents: this.normalizeContent(contents),
+          config: {
+            ...(config.taskType && { taskType: config.taskType }),
+            ...config
+          }
+        });
+
+        return {
+          success: true,
+          provider: this.name,
+          model,
+          embeddings: response.embeddings,
+          usageMetadata: response.usageMetadata
+        };
+      } catch (error) {
+        console.error('Google Embeddings Error:', error);
+        throw this.createProviderError(error);
+      }
+    }
+
+    /**
+     * Upload a file
+     */
+    async uploadFile(params) {
+      this.validateInitialization();
+
+      const { file, config = {} } = params;
+
+      try {
+        const uploadResult = await this.client.files.upload({
+          file,
+          config: {
+            mimeType: config.mimeType,
+            displayName: config.displayName,
+            ...config
+          }
+        });
+
+        return {
+          success: true,
+          provider: this.name,
+          file: uploadResult,
+          uri: uploadResult.uri,
+          name: uploadResult.name,
+          mimeType: uploadResult.mimeType
+        };
+      } catch (error) {
+        console.error('Google File Upload Error:', error);
+        throw this.createProviderError(error);
+      }
+    }
+
+    /**
+     * Get file metadata
+     */
+    async getFile(name) {
+      this.validateInitialization();
+
+      try {
+        const file = await this.client.files.get({ name });
+        return {
+          success: true,
+          provider: this.name,
+          file
+        };
+      } catch (error) {
       console.error('Google Get File Error:', error);
       throw this.createProviderError(error);
     }
