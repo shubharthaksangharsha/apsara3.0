@@ -9,6 +9,7 @@ import Message from '../models/Message.js';
 import UserUsage from '../models/UserUsage.js';
 import User from '../models/User.js';
 import File from '../models/File.js';
+import embeddingService from '../services/embeddingService.js';
 
 const router = express.Router();
 
@@ -840,6 +841,11 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
         // Update conversation stats
         await conversation.incrementStats('rest', usageMetadata?.totalTokenCount || 0);
 
+        // Update embedding asynchronously after every 2 messages (first exchange) or every 5 messages
+        // This runs in the background and doesn't block the response
+        const totalMessages = conversation.stats.totalMessages || 0;
+        embeddingService.updateConversationEmbeddingIfNeeded(conversationId, totalMessages, 'rest');
+
         // Send completion event with final metadata
         res.write(`data: ${JSON.stringify({
           type: 'done',
@@ -977,6 +983,11 @@ router.post('/generate', aiRateLimiter, asyncHandler(async (req, res) => {
 
     // Update conversation stats
     await conversation.incrementStats('rest', aiResponse.usageMetadata?.totalTokenCount || 0);
+
+    // Update embedding asynchronously after every 2 messages (first exchange) or every 5 messages
+    // This runs in the background and doesn't block the response
+    const nonStreamTotalMessages = conversation.stats.totalMessages || 0;
+    embeddingService.updateConversationEmbeddingIfNeeded(conversationId, nonStreamTotalMessages, 'rest');
 
     // Prepare enhanced response with comprehensive metadata
     const response = {

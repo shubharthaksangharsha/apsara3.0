@@ -5,6 +5,7 @@ import ProviderManager from '../../providers/ProviderManager.js';
 import { LiveSessionManager } from './LiveSessionManager.js';
 import { Conversation, Message } from '../../models/index.js';
 import ConversationService from '../database/ConversationService.js';
+import embeddingService from '../embeddingService.js';
 import {MediaResolution} from '@google/genai';
 
 /**
@@ -679,6 +680,14 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         await conversation.incrementStats('live');
       }
 
+      // Update embedding asynchronously after live turn messages
+      // Fetch updated conversation stats for message count
+      const updatedConversation = await Conversation.findOne({ conversationId });
+      if (updatedConversation) {
+        const totalMessages = updatedConversation.stats.totalMessages || 0;
+        embeddingService.updateConversationEmbeddingIfNeeded(conversationId, totalMessages, 'live');
+      }
+
       // Clear accumulators for next turn
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
@@ -769,6 +778,13 @@ Remember: You're having a real-time voice conversation, so keep responses natura
 
       await userMessage.save();
       await conversation.incrementStats('live');
+
+      // Update embedding asynchronously after live text message
+      const updatedConversation = await Conversation.findOne({ conversationId });
+      if (updatedConversation) {
+        const totalMessages = updatedConversation.stats.totalMessages || 0;
+        embeddingService.updateConversationEmbeddingIfNeeded(conversationId, totalMessages, 'live');
+      }
     } catch (error) {
       // Error saving user text
     }

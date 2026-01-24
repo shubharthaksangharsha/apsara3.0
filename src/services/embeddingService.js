@@ -127,6 +127,65 @@ class EmbeddingService {
     const combined = parts.join(' ').trim();
     return combined.substring(0, 5000); // Limit to ~5000 chars
   }
+
+  /**
+   * Update conversation embedding if needed (after every 2 messages or every 5 thereafter)
+   * This runs asynchronously and doesn't block the response
+   * @param {string} conversationId - Conversation ID
+   * @param {number} messageCount - Current message count in the conversation
+   * @param {string} messageType - Type of message ('rest' or 'live')
+   */
+  async updateConversationEmbeddingIfNeeded(conversationId, messageCount, messageType = 'rest') {
+    // Trigger embedding update:
+    // - After first 2 messages (first meaningful exchange)
+    // - Then every 5 messages to keep it fresh
+    const shouldUpdate = messageCount === 2 || messageCount % 5 === 0;
+    
+    if (!shouldUpdate) {
+      return;
+    }
+
+    // Run asynchronously - don't block the response
+    setImmediate(async () => {
+      try {
+        // Dynamic imports to avoid circular dependencies
+        const { default: Conversation } = await import('../models/Conversation.js');
+        const { default: Message } = await import('../models/Message.js');
+
+        const conversation = await Conversation.findOne({ conversationId });
+        if (!conversation) {
+          console.warn(`⚠️ Conversation not found for embedding update: ${conversationId}`);
+          return;
+        }
+
+        // Get recent messages for this conversation
+        const messages = await Message.find({ conversationId })
+          .sort({ createdAt: -1 })
+          .limit(10);
+
+        const searchableContent = this.createSearchableContent(conversation, messages);
+        
+        if (!searchableContent || searchableContent.trim().length === 0) {
+          console.log(`⏭️ No content to embed yet for conversation: ${conversationId}`);
+          return;
+        }
+
+        const embedding = await this.generateDocumentEmbedding(searchableContent);
+        
+        await Conversation.updateOne(
+          { conversationId },
+          { 
+            embedding, 
+            embeddingUpdatedAt: new Date() 
+          }
+        );
+
+        console.log(`✅ Auto-updated embedding for ${messageType} conversation: ${conversationId} (${messageCount} messages)`);
+      } catch (err) {
+        console.error(`⚠️ Failed to update embedding for ${conversationId}:`, err.message);
+      }
+    });
+  }
 }
 
 export default new EmbeddingService();
