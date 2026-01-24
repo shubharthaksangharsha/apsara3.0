@@ -120,6 +120,9 @@ export class LiveApiService {
         case 'send_video':
           await this.handleSendVideo(clientId, message);
           break;
+        case 'send_document':
+          await this.handleSendDocument(clientId, message);
+          break;
         case 'send_context':
           await this.handleSendContext(clientId, message);
           break;
@@ -835,6 +838,114 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       console.log(`[LiveAPI] Video frame sent successfully`);
     } catch (error) {
       console.error(`[LiveAPI] Video send error:`, error.message);
+    }
+  }
+
+  /**
+   * Handle document/file upload from user
+   * Supported formats:
+   * - Images: PNG, JPG, JPEG, GIF, WEBP (sent via sendRealtimeInput)
+   * - Text files: any text/* type (sent via sendClientContent with text part)
+   * 
+   * NOT supported (will fail):
+   * - PDF (application/pdf)
+   * - DOCX, DOC (Word documents)
+   */
+  async handleSendDocument(clientId, message) {
+    const client = this.clients.get(clientId);
+    if (!client?.session) {
+      return this.sendError(clientId, 'No active session');
+    }
+
+    const { data, mimeType, fileName } = message.data || {};
+    if (!data) {
+      return this.sendError(clientId, 'Document data is required');
+    }
+
+    try {
+      console.log(`[LiveAPI] Processing document: ${fileName}, mimeType: ${mimeType}, dataLen: ${data.length}`);
+
+      // Check if it's an image type - send via realtime input like video frames
+      if (mimeType?.startsWith('image/')) {
+        console.log(`[LiveAPI] Sending image via sendRealtimeInput`);
+        
+        // First send a text prompt about the image
+        await client.session.geminiSession.sendClientContent({
+          turns: [{ 
+            role: 'user', 
+            parts: [{ text: `I'm sharing an image with you: "${fileName}". Please analyze it and describe what you see.` }] 
+          }],
+          turnComplete: false
+        });
+        
+        // Then send the image data
+        await client.session.geminiSession.sendRealtimeInput({
+          video: { data, mimeType }
+        });
+        
+        // Complete the turn
+        await client.session.geminiSession.sendClientContent({
+          turns: [],
+          turnComplete: true
+        });
+        
+        console.log(`[LiveAPI] Image sent successfully: ${fileName}`);
+        return;
+      }
+
+      // Check if it's a text-based file - send via sendClientContent with inline data
+      if (mimeType === 'text/plain' || mimeType?.startsWith('text/')) {
+        console.log(`[LiveAPI] Sending text file via sendClientContent with inline data`);
+        
+        // Decode base64 to get the text content
+        const textContent = Buffer.from(data, 'base64').toString('utf-8');
+        
+        // Determine file type for context
+        const fileExtension = fileName?.split('.').pop()?.toLowerCase() || 'txt';
+        let fileTypeDescription = 'text file';
+        if (['py'].includes(fileExtension)) fileTypeDescription = 'Python code';
+        else if (['js', 'ts'].includes(fileExtension)) fileTypeDescription = 'JavaScript/TypeScript code';
+        else if (['kt'].includes(fileExtension)) fileTypeDescription = 'Kotlin code';
+        else if (['java'].includes(fileExtension)) fileTypeDescription = 'Java code';
+        else if (['c', 'cpp', 'h'].includes(fileExtension)) fileTypeDescription = 'C/C++ code';
+        else if (['json'].includes(fileExtension)) fileTypeDescription = 'JSON data';
+        else if (['xml', 'html'].includes(fileExtension)) fileTypeDescription = 'markup';
+        else if (['css'].includes(fileExtension)) fileTypeDescription = 'CSS styles';
+        else if (['md'].includes(fileExtension)) fileTypeDescription = 'Markdown document';
+        else if (['yaml', 'yml'].includes(fileExtension)) fileTypeDescription = 'YAML configuration';
+        
+        // Send as text with context
+        await client.session.geminiSession.sendClientContent({
+          turns: [{ 
+            role: 'user', 
+            parts: [{ 
+              text: `I'm sharing a ${fileTypeDescription} file named "${fileName}" with you. Please analyze it and tell me about its contents:\n\n\`\`\`${fileExtension}\n${textContent}\n\`\`\`` 
+            }] 
+          }],
+          turnComplete: true
+        });
+        
+        console.log(`[LiveAPI] Text file sent successfully: ${fileName}`);
+        return;
+      }
+
+      // For unsupported types, send an error notification
+      console.warn(`[LiveAPI] Unsupported document type: ${mimeType}`);
+      this.sendToClient(clientId, {
+        type: 'document_error',
+        error: `Unsupported file type: ${mimeType}. Supported: images (PNG, JPG, GIF, WEBP) and text files (code, JSON, etc.)`,
+        fileName,
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      console.error(`[LiveAPI] Document send error:`, error.message);
+      this.sendToClient(clientId, {
+        type: 'document_error',
+        error: error.message,
+        fileName,
+        timestamp: new Date().toISOString()
+      });
     }
   }
 
