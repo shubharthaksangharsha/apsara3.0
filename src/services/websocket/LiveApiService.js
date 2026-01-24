@@ -450,6 +450,8 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         // Transcription accumulators
         currentInputTranscription: '',
         currentOutputTranscription: '',
+        // Thinking content accumulator - stores AI's thinking/reasoning text
+        currentThinkingContent: '',
         // Message buffer for saving complete turns
         pendingMessages: [],
         // Thinking state - tracks when AI is "thinking" before speaking
@@ -511,24 +513,44 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       }
       this.sendToClient(clientId, { type: 'audio_data', sessionId, data: response.data });
     } else if (sc?.modelTurn?.parts) {
-      // Check for text thinking parts (like "**Analyzing...**")
+      // Check for text thinking parts (like "**Analyzing...**") and executable code
       for (const part of sc.modelTurn.parts) {
-        if (part.text && !session.isThinking) {
+        // Handle executable code (for logging - code execution results from tools like Google Search)
+        if (part.executableCode) {
+          console.log(`💻 Live: executableCode\n${part.executableCode.code}`);
+        }
+        
+        // Handle code execution result
+        if (part.codeExecutionResult) {
+          console.log(`📊 Live: codeExecutionResult\n${part.codeExecutionResult.output}`);
+        }
+        
+        if (part.text) {
           // Detect thinking patterns - text that starts with ** or contains reasoning
           const isThinking = part.text.startsWith('**') || 
                             part.text.includes('Analyzing') ||
                             part.text.includes('Examining') ||
                             part.text.includes('Interpreting') ||
                             part.text.includes('Processing') ||
-                            part.text.includes('Considering');
+                            part.text.includes('Considering') ||
+                            part.text.includes('Defining') ||
+                            part.text.includes('Deconstructing') ||
+                            part.text.includes('Evaluating') ||
+                            part.text.includes('Thinking') ||
+                            part.text.includes('Reasoning');
           
           if (isThinking) {
-            session.isThinking = true;
-            this.sendToClient(clientId, { 
-              type: 'thinking_started', 
-              sessionId,
-              thought: part.text.slice(0, 100) // Send first 100 chars of thought
-            });
+            // Accumulate thinking content for saving later
+            session.currentThinkingContent += part.text + '\n';
+            
+            if (!session.isThinking) {
+              session.isThinking = true;
+              this.sendToClient(clientId, { 
+                type: 'thinking_started', 
+                sessionId,
+                thought: part.text.slice(0, 100) // Send first 100 chars of thought
+              });
+            }
           }
         }
         
@@ -595,6 +617,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       }
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
+      session.currentThinkingContent = '';
       this.sendToClient(clientId, { type: 'interrupted', sessionId });
     }
 
@@ -716,8 +739,10 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         await conversation.incrementStats('live');
       }
 
-      // Save output transcription as MODEL message
+      // Save output transcription as MODEL message (with thinking content if any)
       const outputText = session.currentOutputTranscription?.trim();
+      const thinkingText = session.currentThinkingContent?.trim();
+      
       if (outputText) {
         const messageSequence = conversation.getNextMessageSequence();
         await conversation.save();
@@ -729,7 +754,11 @@ Remember: You're having a real-time voice conversation, so keep responses natura
           messageSequence,
           messageType: 'live',
           role: 'model',
-          content: { text: outputText },
+          content: { 
+            text: outputText,
+            // Include thinking/reasoning content if available (like normal chat does)
+            thoughts: thinkingText || undefined
+          },
           config: {
             live: {
               model: session.model,
@@ -740,7 +769,8 @@ Remember: You're having a real-time voice conversation, so keep responses natura
           status: 'completed',
           metadata: {
             timing: { requestTime: new Date() },
-            provider: { name: 'google', sessionId: session.id }
+            provider: { name: 'google', sessionId: session.id },
+            hasThoughts: !!thinkingText
           }
         });
 
@@ -759,6 +789,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       // Clear accumulators for next turn
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
+      session.currentThinkingContent = '';
 
     } catch (error) {
       // Error saving turn messages
