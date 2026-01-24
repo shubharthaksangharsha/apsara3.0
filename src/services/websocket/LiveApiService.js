@@ -844,7 +844,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
   /**
    * Handle document/file upload from user
    * Supported formats:
-   * - Images: PNG, JPG, JPEG, GIF, WEBP (sent via sendRealtimeInput)
+   * - Images: PNG, JPG, JPEG, GIF, WEBP (sent via sendClientContent with inlineData)
    * - Text files: any text/* type (sent via sendClientContent with text part)
    * 
    * NOT supported (will fail):
@@ -865,37 +865,39 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     try {
       console.log(`[LiveAPI] Processing document: ${fileName}, mimeType: ${mimeType}, dataLen: ${data.length}`);
 
-      // Check if it's an image type - send via realtime input like video frames
+      // Check if it's an image type - send via sendClientContent with inlineData
       if (mimeType?.startsWith('image/')) {
-        console.log(`[LiveAPI] Sending image via sendRealtimeInput`);
+        console.log(`[LiveAPI] Sending image via sendClientContent with inlineData`);
         
-        // First send a text prompt about the image
-        await client.session.geminiSession.sendClientContent({
-          turns: [{ 
-            role: 'user', 
-            parts: [{ text: `I'm sharing an image with you: "${fileName}". Please analyze it and describe what you see.` }] 
-          }],
-          turnComplete: false
-        });
+        // Send text prompt AND image together in a single turn with inlineData
+        // This matches the format that works in test-live-document.js
+        const imageTurns = [
+          {
+            role: 'user',
+            parts: [
+              { text: `I'm sharing an image named "${fileName}" with you. Please analyze it and describe what you see.` },
+              {
+                inlineData: {
+                  data: data,
+                  mimeType: mimeType,
+                },
+              },
+            ]
+          }
+        ];
         
-        // Then send the image data
-        await client.session.geminiSession.sendRealtimeInput({
-          video: { data, mimeType }
-        });
-        
-        // Complete the turn
-        await client.session.geminiSession.sendClientContent({
-          turns: [],
-          turnComplete: true
+        await client.session.geminiSession.sendClientContent({ 
+          turns: imageTurns, 
+          turnComplete: true 
         });
         
         console.log(`[LiveAPI] Image sent successfully: ${fileName}`);
         return;
       }
 
-      // Check if it's a text-based file - send via sendClientContent with inline data
+      // Check if it's a text-based file - send via sendClientContent with text part
       if (mimeType === 'text/plain' || mimeType?.startsWith('text/')) {
-        console.log(`[LiveAPI] Sending text file via sendClientContent with inline data`);
+        console.log(`[LiveAPI] Sending text file via sendClientContent`);
         
         // Decode base64 to get the text content
         const textContent = Buffer.from(data, 'base64').toString('utf-8');
@@ -915,13 +917,17 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         else if (['yaml', 'yml'].includes(fileExtension)) fileTypeDescription = 'YAML configuration';
         
         // Send as text with context
-        await client.session.geminiSession.sendClientContent({
-          turns: [{ 
+        const textTurns = [
+          { 
             role: 'user', 
             parts: [{ 
               text: `I'm sharing a ${fileTypeDescription} file named "${fileName}" with you. Please analyze it and tell me about its contents:\n\n\`\`\`${fileExtension}\n${textContent}\n\`\`\`` 
             }] 
-          }],
+          }
+        ];
+        
+        await client.session.geminiSession.sendClientContent({
+          turns: textTurns,
           turnComplete: true
         });
         

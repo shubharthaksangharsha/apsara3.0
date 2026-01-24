@@ -246,14 +246,58 @@ export class GoogleProvider extends BaseProvider {
             if (callbacks.onopen) callbacks.onopen();
           },
           onmessage: (message) => {
-            // Better logging - show actual message content summary
-            const msgType = message?.type || 'unknown';
-            const hasData = message?.data ? `(${message.data.length} bytes)` : '';
-            const hasServerContent = message?.serverContent ? 'serverContent' : '';
-            const hasToolCall = message?.toolCall ? 'toolCall' : '';
-            const details = [hasData, hasServerContent, hasToolCall].filter(Boolean).join(', ');
+            // Better logging - show actual message content type and summary
+            const sc = message?.serverContent;
+            let msgType = 'data';
+            let details = [];
             
-            console.log(`📨 Live msg: ${msgType}${details ? ` [${details}]` : ''}`);
+            // Check for audio data
+            if (message?.data) {
+              msgType = 'audio';
+              details.push(`${message.data.length} bytes`);
+            }
+            
+            // Check serverContent types
+            if (sc) {
+              if (sc.inputTranscription?.text) {
+                msgType = 'input_transcription';
+                details.push(`"${sc.inputTranscription.text.slice(0, 30)}..."`);
+              } else if (sc.outputTranscription?.text) {
+                msgType = 'output_transcription';
+                details.push(`"${sc.outputTranscription.text.slice(0, 30)}..."`);
+              } else if (sc.modelTurn?.parts) {
+                const parts = sc.modelTurn.parts;
+                if (parts[0]?.inlineData) {
+                  msgType = 'audio_chunk';
+                  details.push(`${parts.length} parts`);
+                } else if (parts[0]?.text) {
+                  msgType = 'text_response';
+                  details.push(`"${parts[0].text.slice(0, 30)}..."`);
+                }
+              } else if (sc.turnComplete) {
+                msgType = 'turn_complete';
+              } else if (sc.generationComplete) {
+                msgType = 'generation_complete';
+              } else if (sc.interrupted) {
+                msgType = 'interrupted';
+              }
+            }
+            
+            // Check for tool calls
+            if (message?.toolCall) {
+              msgType = 'tool_call';
+              const fnNames = message.toolCall.functionCalls?.map(fc => fc.name) || [];
+              details.push(fnNames.join(', '));
+            }
+            
+            // Check for goAway
+            if (message?.goAway) {
+              msgType = 'go_away';
+              details.push(`timeLeft: ${message.goAway.timeLeft}`);
+            }
+            
+            const detailStr = details.length > 0 ? ` [${details.join(', ')}]` : '';
+            console.log(`📨 Live: ${msgType}${detailStr}`);
             if (callbacks.onmessage) callbacks.onmessage(message);
           },
           onerror: (error) => {
