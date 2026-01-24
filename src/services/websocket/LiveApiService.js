@@ -589,6 +589,10 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         session.isThinking = false;
         this.sendToClient(clientId, { type: 'thinking_stopped', sessionId });
       }
+      // Save any accumulated transcription before clearing (so partial responses are saved)
+      if (session.currentOutputTranscription || session.currentInputTranscription) {
+        this.saveTurnMessages(clientId, sessionId);
+      }
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
       this.sendToClient(clientId, { type: 'interrupted', sessionId });
@@ -1156,7 +1160,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         messageType: 'live',
         role: 'user',
         content: { 
-          text: `[Shared file: ${fileInfo.originalName}]`,
+          text: '',  // No text - just the attachment
           files: [{
             fileId: fileInfo.fileId,
             originalName: fileInfo.originalName,
