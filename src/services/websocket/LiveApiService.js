@@ -4,10 +4,13 @@ import { liveApiRateLimiter, liveApiUserRateLimiter, getLiveApiLimitInfo } from 
 import ProviderManager from '../../providers/ProviderManager.js';
 import { LiveSessionManager } from './LiveSessionManager.js';
 import { Conversation, Message } from '../../models/index.js';
+import File from '../../models/File.js';
 import ConversationService from '../database/ConversationService.js';
 import embeddingService from '../embeddingService.js';
 import {MediaResolution} from '@google/genai';
 import pdf from 'pdf-parse/lib/pdf-parse.js';
+import fs from 'fs/promises';
+import path from 'path';
 
 /**
  * Live API Service
@@ -450,7 +453,9 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         // Message buffer for saving complete turns
         pendingMessages: [],
         // Thinking state - tracks when AI is "thinking" before speaking
-        isThinking: false
+        isThinking: false,
+        // Attachments uploaded during current turn (to be saved with next user message)
+        pendingAttachments: []
       };
 
       this.sessionManager.addSession(sessionId, {
@@ -907,6 +912,62 @@ Remember: You're having a real-time voice conversation, so keep responses natura
    * NOT supported:
    * - DOCX, DOC (Word documents) - would need additional library
    */
+  /**
+   * Helper: Save file to disk and database, return file info
+   */
+  async saveFileToDisk(data, mimeType, fileName, userId, conversationId) {
+    const uploadPath = process.env.UPLOAD_PATH || './uploads';
+    await fs.mkdir(uploadPath, { recursive: true });
+    
+    // Generate unique fileId and filename
+    const fileId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const ext = fileName?.split('.').pop() || 'bin';
+    const savedFileName = `${fileId}.${ext}`;
+    const filePath = path.join(uploadPath, savedFileName);
+    
+    // Decode base64 and save to disk
+    const buffer = Buffer.from(data, 'base64');
+    await fs.writeFile(filePath, buffer);
+    
+    // Determine file type
+    const getFileType = (mime) => {
+      if (mime?.startsWith('image/')) return 'image';
+      if (mime?.startsWith('video/')) return 'video';
+      if (mime?.startsWith('audio/')) return 'audio';
+      if (mime?.includes('pdf') || mime?.includes('document') || mime?.startsWith('text/')) return 'document';
+      return 'other';
+    };
+    
+    // Create file record in database
+    const fileRecord = new File({
+      fileId,
+      userId,
+      conversationId,
+      originalName: fileName,
+      mimeType,
+      size: buffer.length,
+      type: getFileType(mimeType),
+      storage: {
+        provider: 'local',
+        path: filePath,
+        url: `/api/files/${fileId}/download`
+      }
+    });
+    
+    await fileRecord.save();
+    console.log(`[LiveAPI] File saved to disk: ${fileId} -> ${filePath}`);
+    
+    return {
+      fileId,
+      originalName: fileName,
+      mimeType,
+      size: buffer.length,
+      type: getFileType(mimeType),
+      storageProvider: 'local',
+      url: `/api/files/${fileId}/download`
+    };
+  }
+
   async handleSendDocument(clientId, message) {
     const client = this.clients.get(clientId);
     if (!client?.session) {
@@ -918,19 +979,34 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       return this.sendError(clientId, 'Document data is required');
     }
 
+    const session = client.session;
+    let savedFileInfo = null;
+    let promptText = '';
+
     try {
       console.log(`[LiveAPI] Processing document: ${fileName}, mimeType: ${mimeType}, dataLen: ${data.length}`);
+
+      // Save file to disk and database for all supported types
+      try {
+        savedFileInfo = await this.saveFileToDisk(data, mimeType, fileName, session.userId, session.conversationId);
+        console.log(`[LiveAPI] File saved: ${savedFileInfo.fileId}`);
+      } catch (saveError) {
+        console.error(`[LiveAPI] Failed to save file:`, saveError.message);
+        // Continue even if save fails - still try to send to Gemini
+      }
 
       // Check if it's an image type - send via sendClientContent with inlineData
       if (mimeType?.startsWith('image/')) {
         console.log(`[LiveAPI] Sending image via sendClientContent with inlineData`);
+        
+        promptText = `I'm sharing an image named "${fileName}" with you. Please analyze it and describe what you see.`;
         
         // Send text prompt AND image together in a single turn with inlineData
         const imageTurns = [
           {
             role: 'user',
             parts: [
-              { text: `I'm sharing an image named "${fileName}" with you. Please analyze it and describe what you see.` },
+              { text: promptText },
               {
                 inlineData: {
                   data: data,
@@ -947,11 +1023,9 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         });
         
         console.log(`[LiveAPI] Image sent successfully: ${fileName}`);
-        return;
       }
-
       // Check if it's a PDF - extract text and send as text
-      if (mimeType === 'application/pdf') {
+      else if (mimeType === 'application/pdf') {
         console.log(`[LiveAPI] PDF detected - extracting text for Live API compatibility`);
         
         try {
@@ -963,13 +1037,13 @@ Remember: You're having a real-time voice conversation, so keep responses natura
           
           console.log(`[LiveAPI] PDF extracted: ${pdfData.numpages} pages, ${pdfData.text.length} chars`);
           
+          promptText = `I'm sharing a PDF document named "${fileName}" with ${pdfData.numpages} pages. Please analyze it and tell me about its contents:\n\n--- PDF CONTENT START ---\n${pdfData.text}\n--- PDF CONTENT END ---`;
+          
           // Send extracted text
           const pdfTurns = [
             {
               role: 'user',
-              parts: [{
-                text: `I'm sharing a PDF document named "${fileName}" with ${pdfData.numpages} pages. Please analyze it and tell me about its contents:\n\n--- PDF CONTENT START ---\n${pdfData.text}\n--- PDF CONTENT END ---`
-              }]
+              parts: [{ text: promptText }]
             }
           ];
           
@@ -979,7 +1053,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
           });
           
           console.log(`[LiveAPI] PDF sent successfully as text: ${fileName}`);
-          return;
           
         } catch (pdfError) {
           console.error(`[LiveAPI] PDF extraction failed:`, pdfError.message);
@@ -992,9 +1065,8 @@ Remember: You're having a real-time voice conversation, so keep responses natura
           return;
         }
       }
-
       // Check if it's a text-based file - send via sendClientContent with text part
-      if (mimeType === 'text/plain' || mimeType?.startsWith('text/')) {
+      else if (mimeType === 'text/plain' || mimeType?.startsWith('text/')) {
         console.log(`[LiveAPI] Sending text file via sendClientContent`);
         
         // Decode base64 to get the text content
@@ -1014,13 +1086,13 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         else if (['md'].includes(fileExtension)) fileTypeDescription = 'Markdown document';
         else if (['yaml', 'yml'].includes(fileExtension)) fileTypeDescription = 'YAML configuration';
         
+        promptText = `I'm sharing a ${fileTypeDescription} file named "${fileName}" with you. Please analyze it and tell me about its contents:\n\n\`\`\`${fileExtension}\n${textContent}\n\`\`\``;
+        
         // Send as text with context
         const textTurns = [
           { 
             role: 'user', 
-            parts: [{ 
-              text: `I'm sharing a ${fileTypeDescription} file named "${fileName}" with you. Please analyze it and tell me about its contents:\n\n\`\`\`${fileExtension}\n${textContent}\n\`\`\`` 
-            }] 
+            parts: [{ text: promptText }] 
           }
         ];
         
@@ -1030,17 +1102,23 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         });
         
         console.log(`[LiveAPI] Text file sent successfully: ${fileName}`);
+      }
+      else {
+        // For unsupported types, send an error notification
+        console.warn(`[LiveAPI] Unsupported document type: ${mimeType}`);
+        this.sendToClient(clientId, {
+          type: 'document_error',
+          error: `Unsupported file type: ${mimeType}. Supported: images (PNG, JPG, GIF, WEBP), PDF documents, and text files (code, JSON, etc.)`,
+          fileName,
+          timestamp: new Date().toISOString()
+        });
         return;
       }
 
-      // For unsupported types, send an error notification
-      console.warn(`[LiveAPI] Unsupported document type: ${mimeType}`);
-      this.sendToClient(clientId, {
-        type: 'document_error',
-        error: `Unsupported file type: ${mimeType}. Supported: images (PNG, JPG, GIF, WEBP), PDF documents, and text files (code, JSON, etc.)`,
-        fileName,
-        timestamp: new Date().toISOString()
-      });
+      // Save document message to database immediately (with attachment info)
+      if (savedFileInfo) {
+        await this.saveDocumentMessage(clientId, promptText, savedFileInfo);
+      }
 
     } catch (error) {
       console.error(`[LiveAPI] Document send error:`, error.message);
@@ -1050,6 +1128,70 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         fileName,
         timestamp: new Date().toISOString()
       });
+    }
+  }
+
+  /**
+   * Save a document upload as a user message with attachment
+   */
+  async saveDocumentMessage(clientId, promptText, fileInfo) {
+    const client = this.clients.get(clientId);
+    if (!client?.session) return;
+
+    const session = client.session;
+    const conversationId = session.conversationId;
+
+    try {
+      const conversation = await Conversation.findOne({ conversationId });
+      if (!conversation) return;
+
+      const messageSequence = conversation.getNextMessageSequence();
+      await conversation.save();
+
+      const userMessage = new Message({
+        messageId: uuidv4(),
+        conversationId,
+        userId: session.userId,
+        messageSequence,
+        messageType: 'live',
+        role: 'user',
+        content: { 
+          text: `[Shared file: ${fileInfo.originalName}]`,
+          files: [{
+            fileId: fileInfo.fileId,
+            originalName: fileInfo.originalName,
+            url: fileInfo.url,
+            mimeType: fileInfo.mimeType,
+            size: fileInfo.size,
+            type: fileInfo.type,
+            storageProvider: fileInfo.storageProvider
+          }]
+        },
+        config: {
+          live: {
+            model: session.model,
+            sessionId: session.id,
+            responseModalities: ['AUDIO']
+          }
+        },
+        status: 'completed',
+        metadata: {
+          timing: { requestTime: new Date() },
+          provider: { name: 'google', sessionId: session.id }
+        }
+      });
+
+      await userMessage.save();
+      await conversation.incrementStats('live');
+      
+      console.log(`[LiveAPI] Document message saved: ${fileInfo.fileId} -> conversation ${conversationId}`);
+
+      // Update embedding asynchronously
+      const totalMessages = conversation.stats.totalMessages || 0;
+      embeddingService.updateConversationEmbeddingIfNeeded(conversationId, totalMessages + 1, 'live');
+
+    } catch (error) {
+      console.error(`[LiveAPI] Failed to save document message:`, error.message);
     }
   }
 
