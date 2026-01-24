@@ -7,6 +7,7 @@ import { Conversation, Message } from '../../models/index.js';
 import ConversationService from '../database/ConversationService.js';
 import embeddingService from '../embeddingService.js';
 import {MediaResolution} from '@google/genai';
+import pdf from 'pdf-parse/lib/pdf-parse.js';
 
 /**
  * Live API Service
@@ -447,7 +448,9 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         currentInputTranscription: '',
         currentOutputTranscription: '',
         // Message buffer for saving complete turns
-        pendingMessages: []
+        pendingMessages: [],
+        // Thinking state - tracks when AI is "thinking" before speaking
+        isThinking: false
       };
 
       this.sessionManager.addSession(sessionId, {
@@ -494,28 +497,76 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     // Priority 1: Audio data - send immediately for lowest latency
+    // Also signals end of thinking phase
     if (response.data) {
+      // Stop thinking sound when audio starts
+      if (session.isThinking) {
+        session.isThinking = false;
+        this.sendToClient(clientId, { type: 'thinking_stopped', sessionId });
+      }
       this.sendToClient(clientId, { type: 'audio_data', sessionId, data: response.data });
-    } else if (sc?.modelTurn?.parts?.[0]?.inlineData?.data) {
-      const part = sc.modelTurn.parts[0];
-      if (part.inlineData.mimeType?.startsWith('audio/')) {
-        this.sendToClient(clientId, { type: 'audio_data', sessionId, data: part.inlineData.data });
+    } else if (sc?.modelTurn?.parts) {
+      // Check for text thinking parts (like "**Analyzing...**")
+      for (const part of sc.modelTurn.parts) {
+        if (part.text && !session.isThinking) {
+          // Detect thinking patterns - text that starts with ** or contains reasoning
+          const isThinking = part.text.startsWith('**') || 
+                            part.text.includes('Analyzing') ||
+                            part.text.includes('Examining') ||
+                            part.text.includes('Interpreting') ||
+                            part.text.includes('Processing') ||
+                            part.text.includes('Considering');
+          
+          if (isThinking) {
+            session.isThinking = true;
+            this.sendToClient(clientId, { 
+              type: 'thinking_started', 
+              sessionId,
+              thought: part.text.slice(0, 100) // Send first 100 chars of thought
+            });
+          }
+        }
+        
+        // Handle audio inline data
+        if (part.inlineData?.mimeType?.startsWith('audio/')) {
+          // Stop thinking sound when audio starts
+          if (session.isThinking) {
+            session.isThinking = false;
+            this.sendToClient(clientId, { type: 'thinking_stopped', sessionId });
+          }
+          this.sendToClient(clientId, { type: 'audio_data', sessionId, data: part.inlineData.data });
+        }
       }
     }
 
     // Priority 2: Transcriptions
     if (sc?.inputTranscription?.text) {
+      // User input stops any thinking
+      if (session.isThinking) {
+        session.isThinking = false;
+        this.sendToClient(clientId, { type: 'thinking_stopped', sessionId });
+      }
       session.currentInputTranscription += sc.inputTranscription.text;
       this.sendToClient(clientId, { type: 'input_transcription', sessionId, text: session.currentInputTranscription });
     }
 
     if (sc?.outputTranscription?.text) {
+      // Output transcription means AI is speaking - stop thinking sound
+      if (session.isThinking) {
+        session.isThinking = false;
+        this.sendToClient(clientId, { type: 'thinking_stopped', sessionId });
+      }
       session.currentOutputTranscription += sc.outputTranscription.text;
       this.sendToClient(clientId, { type: 'output_transcription', sessionId, text: session.currentOutputTranscription });
     }
 
     // Priority 3: Turn/Generation events - save async (don't block)
     if (sc?.turnComplete) {
+      // Turn complete stops thinking
+      if (session.isThinking) {
+        session.isThinking = false;
+        this.sendToClient(clientId, { type: 'thinking_stopped', sessionId });
+      }
       this.saveTurnMessages(clientId, sessionId); // No await - fire and forget
       this.sendToClient(clientId, { type: 'turn_complete', sessionId });
     }
@@ -528,6 +579,11 @@ Remember: You're having a real-time voice conversation, so keep responses natura
     }
 
     if (sc?.interrupted) {
+      // Interruption stops thinking
+      if (session.isThinking) {
+        session.isThinking = false;
+        this.sendToClient(clientId, { type: 'thinking_stopped', sessionId });
+      }
       session.currentInputTranscription = '';
       session.currentOutputTranscription = '';
       this.sendToClient(clientId, { type: 'interrupted', sessionId });
@@ -846,10 +902,10 @@ Remember: You're having a real-time voice conversation, so keep responses natura
    * Supported formats:
    * - Images: PNG, JPG, JPEG, GIF, WEBP (sent via sendClientContent with inlineData)
    * - Text files: any text/* type (sent via sendClientContent with text part)
+   * - PDF: extracted text and sent as text (using pdf-parse)
    * 
-   * NOT supported (will fail):
-   * - PDF (application/pdf)
-   * - DOCX, DOC (Word documents)
+   * NOT supported:
+   * - DOCX, DOC (Word documents) - would need additional library
    */
   async handleSendDocument(clientId, message) {
     const client = this.clients.get(clientId);
@@ -870,7 +926,6 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         console.log(`[LiveAPI] Sending image via sendClientContent with inlineData`);
         
         // Send text prompt AND image together in a single turn with inlineData
-        // This matches the format that works in test-live-document.js
         const imageTurns = [
           {
             role: 'user',
@@ -893,6 +948,49 @@ Remember: You're having a real-time voice conversation, so keep responses natura
         
         console.log(`[LiveAPI] Image sent successfully: ${fileName}`);
         return;
+      }
+
+      // Check if it's a PDF - extract text and send as text
+      if (mimeType === 'application/pdf') {
+        console.log(`[LiveAPI] PDF detected - extracting text for Live API compatibility`);
+        
+        try {
+          // Decode base64 to get PDF buffer
+          const pdfBuffer = Buffer.from(data, 'base64');
+          
+          // Extract text from PDF
+          const pdfData = await pdf(pdfBuffer);
+          
+          console.log(`[LiveAPI] PDF extracted: ${pdfData.numpages} pages, ${pdfData.text.length} chars`);
+          
+          // Send extracted text
+          const pdfTurns = [
+            {
+              role: 'user',
+              parts: [{
+                text: `I'm sharing a PDF document named "${fileName}" with ${pdfData.numpages} pages. Please analyze it and tell me about its contents:\n\n--- PDF CONTENT START ---\n${pdfData.text}\n--- PDF CONTENT END ---`
+              }]
+            }
+          ];
+          
+          await client.session.geminiSession.sendClientContent({
+            turns: pdfTurns,
+            turnComplete: true
+          });
+          
+          console.log(`[LiveAPI] PDF sent successfully as text: ${fileName}`);
+          return;
+          
+        } catch (pdfError) {
+          console.error(`[LiveAPI] PDF extraction failed:`, pdfError.message);
+          this.sendToClient(clientId, {
+            type: 'document_error',
+            error: `Failed to extract text from PDF: ${pdfError.message}`,
+            fileName,
+            timestamp: new Date().toISOString()
+          });
+          return;
+        }
       }
 
       // Check if it's a text-based file - send via sendClientContent with text part
@@ -939,7 +1037,7 @@ Remember: You're having a real-time voice conversation, so keep responses natura
       console.warn(`[LiveAPI] Unsupported document type: ${mimeType}`);
       this.sendToClient(clientId, {
         type: 'document_error',
-        error: `Unsupported file type: ${mimeType}. Supported: images (PNG, JPG, GIF, WEBP) and text files (code, JSON, etc.)`,
+        error: `Unsupported file type: ${mimeType}. Supported: images (PNG, JPG, GIF, WEBP), PDF documents, and text files (code, JSON, etc.)`,
         fileName,
         timestamp: new Date().toISOString()
       });
